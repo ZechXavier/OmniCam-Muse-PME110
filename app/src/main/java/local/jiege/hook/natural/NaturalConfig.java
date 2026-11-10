@@ -20,19 +20,33 @@ final class NaturalConfig {
     private static final Pattern USM_STRENGTH = Pattern.compile("usmStrength(1X|3X)");
     private static final Pattern LCE_STRENGTH = Pattern.compile("lceStrength(Face)?");
 
+    // MTK (Dimensity 9500 / PME110): the QTI keys above do not exist in the MTK tuning json.
+    // The MTK equivalents, detected by the presence of this MTK-only section (absent on QTI,
+    // so the MTK patterns are a no-op there and QTI behaviour is unchanged).
+    private static final String GAN_SECTION = "GanSRUsmSharpParamsSet";
+    /** GanSRU USM sharpening strength: the scale multipliers plus the master enable switch. */
+    private static final Pattern MTK_USM_STRENGTH = Pattern.compile("(BnScale|QbcScale|configGanSRUsmSharpEnable)");
+    /** MTK local-contrast / global-contrast strengths in TMCParamsSet. */
+    private static final Pattern MTK_LCE_STRENGTH = Pattern.compile(
+            "(highLightLceParam(Front|Hizoom)?|nightDarkLceParam|highZoomLceContrastParam"
+            + "|hightZoom200MLceParm|backGlobalContrastParam(Front|Hizoom)?|faceBackContrastScale)");
+
     private NaturalConfig() {}
 
     /** Returns the stock json with the selected features turned off. */
     static String apply(String stockJson, boolean noAiDetail, boolean noLce) throws JSONException {
         JSONObject root = new JSONObject(stockJson);
+        boolean mtk = root.has(GAN_SECTION);
         if (noAiDetail) {
             for (String section : ENHANCE_SECTIONS) {
                 zeroMatching(root.optJSONObject(section), ENHANCE_WEIGHT);
             }
             zeroMatching(root.optJSONObject(TMC_SECTION), USM_STRENGTH);
+            if (mtk) zeroMatching(root.optJSONObject(GAN_SECTION), MTK_USM_STRENGTH);
         }
         if (noLce) {
             zeroMatching(root.optJSONObject(TMC_SECTION), LCE_STRENGTH);
+            if (mtk) zeroMatching(root.optJSONObject(TMC_SECTION), MTK_LCE_STRENGTH);
         }
         return root.toString();
     }

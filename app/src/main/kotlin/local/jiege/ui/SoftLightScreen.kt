@@ -20,6 +20,9 @@ import top.yukonga.miuix.kmp.icon.basic.ArrowRight
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 
+/** True on MTK devices (no QTI BasicTone backend): the "关闭对比度增强" fusion hook has no target there. */
+private val isMtk: Boolean = !java.io.File("/odm/lib64/libBasicTonePhotoX9.so").exists()
+
 private val LEVELS = listOf(
     Triple(ModuleSettings.SOFT_LIGHT_WEAK_HDF, "弱", "HDF"),
     Triple(ModuleSettings.SOFT_LIGHT_MEDIUM_BLACK_MIST, "中", "1/4 黑柔"),
@@ -80,7 +83,8 @@ internal fun SoftLightScreen(padding: PaddingValues, nestedScroll: NestedScrollC
                     store = store,
                     key = ModuleSettings.SOFT_LIGHT_NO_LOCAL_CONTRAST,
                     title = "关闭对比度增强",
-                    summary = "获得更贴近物理的效果，但丢失部分通透度",
+                    summary = if (isMtk) "此设备不支持：天玑平台没有该融合接口" else "获得更贴近物理的效果，但丢失部分通透度",
+                    enabled = !isMtk,
                 )
             }
         }

@@ -182,9 +182,20 @@ float *field(void *object, size_t offset) {
     return *reinterpret_cast<float **>(static_cast<char *>(object) + offset);
 }
 
+// MTK: the GR port's processCore hook is gated off (no libBasicTonePhotoX9.so), so
+// basicToneMasterFrame() is always false. The Java side sets this flag while the camera is in
+// master mode (MasterLutSlots.nativeSetMasterActive), which scopes the slots to master captures.
+// On QTI the flag is never consulted, so the per-frame gate is unchanged there.
+std::atomic<bool> masterActiveMtk{false};
+
+bool masterFrame() {
+    if (basicToneMasterFrame()) return true;
+    return !hasQtiBasicToneLib() && masterActiveMtk.load();
+}
+
 uintptr_t resize(void *object, float *src, float *lut, float *dst, int nSrc, int nLut) {
     auto active = slots();
-    if (!basicToneMasterFrame() || (active->pre.empty() && active->post.empty()) || src != field(object, kLmtTable)) {
+    if (!masterFrame() || (active->pre.empty() && active->post.empty()) || src != field(object, kLmtTable)) {
         return originalResize(object, src, lut, dst, nSrc, nLut);
     }
     int count = nSrc * nSrc * nSrc;
@@ -204,7 +215,7 @@ uintptr_t resize(void *object, float *src, float *lut, float *dst, int nSrc, int
 
 uintptr_t load3D(void *object, float *src, void *dst, int n) {
     auto active = slots();
-    if (!basicToneMasterFrame() || (active->pre.empty() && active->post.empty()) || src != field(object, kLmtTable)) {
+    if (!masterFrame() || (active->pre.empty() && active->post.empty()) || src != field(object, kLmtTable)) {
         return originalLoad3D(object, src, dst, n);
     }
     int count = n * n * n;
@@ -238,7 +249,9 @@ uintptr_t resize2Rgb(float *src, float *lut, float *dst, int nSrc, int nLut, int
 }  // namespace
 
 void onLibraryLoadedForLutSlots(HookFunction hook, const char *name, void *handle) {
-    if (std::strstr(name, "libBasicTonePhotoX9.so") && !originalResize) {
+    // Capture merge: QTI X9 backend or the MTK libBasicTonePhoto.so (same symbols, same table
+    // offsets 0xd48/0xd50/0xd58, verified against the MTK stock lib).
+    if ((std::strstr(name, "libBasicTonePhotoX9.so") || std::strstr(name, "libBasicTonePhoto.so")) && !originalResize) {
         hookExport(hook, handle, "_ZN9BasicTone18MergeLutTet_resizeEPfS0_S0_ii",
                    reinterpret_cast<void *>(resize), reinterpret_cast<void **>(&originalResize), kTag);
         hookExport(hook, handle, "_ZN13BasicTone_OGL9load3DLutIDhEEiPfPT_i",
@@ -263,6 +276,12 @@ extern "C" JNIEXPORT void JNICALL
 Java_local_jiege_hook_masterlut_MasterLutSlots_nativePreviewBegin(JNIEnv *, jclass, jboolean master) {
     previewApplied.store(false);
     previewMaster.store(master);
+}
+
+// MTK master-capture gate (see masterFrame): the Java side sets this while in master mode.
+extern "C" JNIEXPORT void JNICALL
+Java_local_jiege_hook_masterlut_MasterLutSlots_nativeSetMasterActive(JNIEnv *, jclass, jboolean master) {
+    masterActiveMtk.store(master == JNI_TRUE);
 }
 
 // The returned preview table (interleaved RGB, size³ entries). When the stock skipped the merge (every

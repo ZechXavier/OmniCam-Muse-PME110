@@ -32,6 +32,9 @@ public final class MasterLutSlots {
 
     private static native void nativeSetParams(int[] values);
     private static native void nativePreviewBegin(boolean master);
+    // MTK capture gate (native master_lut_slots.cpp): true while the camera is in master mode,
+    // so the capture slots apply. On QTI the native side ignores it (per-frame gate instead).
+    private static native void nativeSetMasterActive(boolean master);
     private static native void nativePreviewEnd(float[] table, int size);
 
     public static void installCamera(ClassLoader classLoader) {
@@ -41,12 +44,15 @@ public final class MasterLutSlots {
             @Override protected void beforeHookedMethod(MethodHookParam param) {
                 lut3d = param.thisObject;
                 previewMode = (String) param.args[2];
+                Log.guard(TAG, "master active", () -> nativeSetMasterActive(FilterScope.MASTER_MODE.equals(previewMode)));
             }
         }));
         Log.guard(TAG, "preview table", () -> XposedBridge.hookAllMethods(XposedHelpers.findClass(COMBINER, classLoader), "process",
             new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam param) {
-                    nativePreviewBegin(FilterScope.MASTER_MODE.equals(previewMode));
+                    boolean master = FilterScope.MASTER_MODE.equals(previewMode);
+                    nativePreviewBegin(master);
+                    Log.guard(TAG, "master active", () -> nativeSetMasterActive(master));
                 }
 
                 @Override protected void afterHookedMethod(MethodHookParam param) {

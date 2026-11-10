@@ -932,6 +932,13 @@ struct FusionHook {
         return 0;
     }
     static void install(HookFunction hook, const char *name, void *handle) {
+        // MTK (PME110): odtFusionPro does not exist in the MTK HDRTransform libs (the fusion is
+        // inline in the monolithic TmcDownTransform::mainProcessScale4), so there is nothing to
+        // hook. Skip cleanly instead of logging a hook failure; the MsRender glow half is unaffected.
+        if (!dlsym(handle, "_ZN14TmcDownTransEF12odtFusionProERN9framework3ocl8CLBufferES3_S3_bb")) {
+            __android_log_print(ANDROID_LOG_INFO, TAG, "odtFusionPro absent in %s, FusionHook skipped (MTK)", name);
+            return;
+        }
         copyTo = reinterpret_cast<CopyTo>(dlsym(handle, "_ZNK9framework3ocl8CLBuffer6copyToERS1_RKb"));
         hookExport(hook, handle, "_ZN14TmcDownTransEF12odtFusionProERN9framework3ocl8CLBufferES3_S3_bb",
                    reinterpret_cast<void *>(&call), reinterpret_cast<void **>(&orig), TAG);

@@ -67,6 +67,7 @@ bool siteSearched;
 std::atomic<bool> softenMode{false};
 std::mutex epsMutex;
 char appliedEps[24] = "stock";  // for the status file
+char observedEps[24] = "";     // MTK: stock eps seen by the Guidefilter hook (first call per lib)
 bool lastServed;                // whether the last tuning json read got the edited copy
 
 int findLibrary(dl_phdr_info *info, size_t, void *result) {
@@ -212,8 +213,56 @@ void writeStatus() {
     if (!file) return;
     std::fprintf(file, "tuning json: %s\neps: %s%s\n", lastServed ? "edited copy" : "stock", appliedEps,
                  site.mov ? "" : " (eps site not located)");
+    if (observedEps[0]) std::fprintf(file, "stock eps observed: %s\n", observedEps);
     std::fclose(file);
 }
+
+// ---- MTK (Dimensity 9500 / PME110) guided-filter eps ---------------------------------------
+// The MTK HDRTransform libs have no TmcDownTransModule and no mov/movk eps constant to rewrite.
+// The guided filter runs on the GPU in GuidefilterProcessOpenclStep1/Step2, and the eps is their
+// 5th argument (a float). Hook both by mangled name and replace the argument with the soften
+// value when one is set. Larger eps => smaller a = cov/(var+eps) => less detail => softer.
+// The stock eps is supplied by the caller and was not determined statically (likely 1e-6); the
+// first call per library logs the incoming value so it can be calibrated on-device.
+constexpr char kStep1Symbol[] = "_Z29GuidefilterProcessOpenclStep1N9framework3ocl8CLBufferES1_S1_ifiii";
+constexpr char kStep2Symbol[] = "_Z29GuidefilterProcessOpenclStep2N9framework3ocl8CLBufferES1_S1_ifiii";
+using GuideFilterFn = void (*)(void *, void *, void *, int, float, int, int, int);
+
+// Lib 0 = HDRTransformCamera, 1 = HDRTransformQuick, 2 = PortraitHDRTransform. Each library
+// carries its own copy, so each gets its own originals (same pattern as soft_light's FusionHook).
+template <int Lib>
+struct GuideFilterHook {
+    static GuideFilterFn origStep1;
+    static GuideFilterFn origStep2;
+    static std::atomic<bool> logged;
+    static void logIncoming(float eps, int step) {
+        if (logged.exchange(true)) return;
+        __android_log_print(ANDROID_LOG_INFO, kTag, "Guidefilter eps in=%.9g (lib %d, step %d)", double(eps), Lib, step);
+        std::snprintf(observedEps, sizeof(observedEps), "%.9g", double(eps));
+        writeStatus();
+    }
+    static void hookStep1(void *a, void *b, void *c, int d, float eps, int f, int g, int h) {
+        logIncoming(eps, 1);
+        float want = wantedEps();
+        if (want > 0) eps = want;
+        origStep1(a, b, c, d, eps, f, g, h);
+    }
+    static void hookStep2(void *a, void *b, void *c, int d, float eps, int f, int g, int h) {
+        logIncoming(eps, 2);
+        float want = wantedEps();
+        if (want > 0) eps = want;
+        origStep2(a, b, c, d, eps, f, g, h);
+    }
+    static void install(HookFunction hook, void *handle) {
+        hookExport(hook, handle, kStep1Symbol, reinterpret_cast<void *>(&hookStep1),
+                   reinterpret_cast<void **>(&origStep1), kTag);
+        hookExport(hook, handle, kStep2Symbol, reinterpret_cast<void *>(&hookStep2),
+                   reinterpret_cast<void **>(&origStep2), kTag);
+    }
+};
+template <int Lib> GuideFilterFn GuideFilterHook<Lib>::origStep1 = nullptr;
+template <int Lib> GuideFilterFn GuideFilterHook<Lib>::origStep2 = nullptr;
+template <int Lib> std::atomic<bool> GuideFilterHook<Lib>::logged{false};
 
 }  // namespace
 
@@ -231,13 +280,28 @@ void *applyEpsAfterLoad(void *) {
     return nullptr;
 }
 
-void onLibraryLoadedForNatural(const char *name) {
-    if (!name || !std::strstr(name, kLibraryName)) return;
-    pthread_t worker;
-    if (pthread_create(&worker, nullptr, applyEpsAfterLoad, nullptr) == 0) {
-        pthread_detach(worker);
-    } else {
-        __android_log_print(ANDROID_LOG_ERROR, kTag, "eps patch worker could not start");
+void onLibraryLoadedForNatural(HookFunction hook, const char *name, void *handle) {
+    if (!name) return;
+    if (hasQtiBasicToneLib()) {
+        // QTI: the mov/movk eps patch in the Camera HDRTransform lib, off the loader lock.
+        if (!std::strstr(name, kLibraryName)) return;
+        pthread_t worker;
+        if (pthread_create(&worker, nullptr, applyEpsAfterLoad, nullptr) == 0) {
+            pthread_detach(worker);
+        } else {
+            __android_log_print(ANDROID_LOG_ERROR, kTag, "eps patch worker could not start");
+        }
+        return;
+    }
+    // MTK: no mov/movk eps constant exists; hook the guided-filter steps by name instead.
+    // Each HDRTransform library (Camera / Quick / Portrait) carries its own copy.
+    if (!std::strstr(name, "HDRTransform")) return;
+    if (std::strstr(name, "libOPAlgoCamHDRTransformCamera.so")) {
+        GuideFilterHook<0>::install(hook, handle);
+    } else if (std::strstr(name, "libOPAlgoCamHDRTransformQuick.so")) {
+        GuideFilterHook<1>::install(hook, handle);
+    } else if (std::strstr(name, "libOPAlgoCamPortraitHDRTransform.so")) {
+        GuideFilterHook<2>::install(hook, handle);
     }
 }
 

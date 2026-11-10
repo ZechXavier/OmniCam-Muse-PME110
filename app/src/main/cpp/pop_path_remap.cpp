@@ -138,7 +138,13 @@ static void hookSymbol(HookFunction hook, void *handle, const char *symbol, void
 }
 
 void installPopPathRemap(HookFunction hook) {
-    void *libc = dlopen("libc.so", RTLD_NOW);
+    // Do NOT dlopen() here: native_init runs inside the linker's dlopen() while it holds
+    // its lock (see natural_mode.cpp), so a nested dlopen("libc.so") deadlocks on the
+    // linker mutex - the camera main thread blocks in MutexLockWithTimeout inside
+    // native_init and the camera shows a black screen (PME110, camstack 2026-11-10).
+    // dlsym(RTLD_DEFAULT) finds the libc symbols in the already-loaded global scope
+    // without touching the loader, so no dlopen call is needed at all.
+    void *libc = RTLD_DEFAULT;
     if (libc) {
         hookSymbol(hook, libc, "openat", reinterpret_cast<void *>(hookedOpenat), reinterpret_cast<void **>(&originalOpenat));
         // Bionic access() delegates to faccessat(). Hooking both also relocates

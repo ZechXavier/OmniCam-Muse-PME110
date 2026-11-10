@@ -16,7 +16,7 @@ void hookExport(HookFunction hook, void *handle, const char *symbol, void *repla
 void installPopPathRemap(HookFunction hook);
 
 // Natural photo mode (natural_mode.cpp): the edited tuning json and the softening, both per photo.
-void onLibraryLoadedForNatural(const char *name);
+void onLibraryLoadedForNatural(HookFunction hook, const char *name, void *handle);
 // Returns the path to open instead of the tuning json, or null for every other path.
 const char *naturalRemapPath(const char *path, char *buf, size_t n);
 
@@ -33,6 +33,9 @@ void onLibraryLoadedForSoftLight(HookFunction hook, const char *name, void *hand
 void onLibraryLoadedForGr(HookFunction hook, const char *name, void *handle);
 // True while BasicTone processes a master capture (set by the GR port's processCore hook).
 bool basicToneMasterFrame();
+// True when the QTI BasicTone backend (libBasicTonePhotoX9.so) exists: the GR native hook set's
+// hardcoded offsets are only valid on QTI. False on MTK (PME110).
+bool hasQtiBasicToneLib();
 
 // Master LUT slots (master_lut_slots.cpp): called for every library the camera process loads.
 void onLibraryLoadedForLutSlots(HookFunction hook, const char *name, void *handle);

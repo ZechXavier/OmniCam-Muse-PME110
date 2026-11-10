@@ -8,12 +8,19 @@
 // Master frames (capture mode 33) get the live master-colour LMT instead (master_color.cpp), unless
 // files/jiege/mastercolor/off exists.
 // Offsets are for PMA110 Camera 7.006.77 (libAlgoInterface.so / libBasicTonePhoto*.so).
+// PME110 (MTK) port note: every offset in this file - the settings accessor address
+// (0x150cdd0), the AlgoProcessData field offsets (0x8110, 0x18, 0x3c, 0xeb0) - is
+// QTI-only. On the MTK libAlgoInterface.so 0x150cdd0 lands in the middle of
+// hybridrawSetBlackLevel, so calling it as getSettingInt segfaults the camera on the
+// first frame. The GR native hooks are therefore installed only when the QTI
+// libBasicTonePhotoX9.so backend exists; without it GR BasicTone cannot work anyway.
 #include <android/log.h>
 #include <cstdint>
 #include <cstring>
 #include <dlfcn.h>
 #include <mutex>
 #include <string>
+#include <unistd.h>
 #include <unordered_map>
 
 #include "native_hooks.h"
@@ -211,7 +218,14 @@ bool basicToneMasterFrame() {
     return activeMaster;
 }
 
+// QTI-only backend: absent on MTK devices (PME110), where the hardcoded offsets
+// above are invalid. Gate the whole GR native hook set on it.
+bool hasQtiBasicToneLib() {
+    return access("/odm/lib64/libBasicTonePhotoX9.so", F_OK) == 0;
+}
+
 void onLibraryLoadedForGr(HookFunction hook, const char *name, void *handle) {
+    if (!hasQtiBasicToneLib()) return;  // MTK: QTI offsets invalid, GR BasicTone unavailable
     if (std::strstr(name, "libAlgoInterface.so")) {
         hookAlgoInterface(hook, handle);
     } else if (std::strstr(name, "libBasicTonePhotoX9.so") || std::strstr(name, "libBasicTonePhoto.so")) {
