@@ -233,7 +233,7 @@ std::shared_ptr<const Cube> grScCwcmTable(int n) {
     Cube sc, cwcm;
     std::string root = kRicohLmt;
     if (!readCube(root + "/SC" + suffix + "Lut4", n, sc) || !readCube(root + "/CWCM" + suffix + "Lut4", n, cwcm)) {
-        __android_log_print(ANDROID_LOG_ERROR, kTag, "GR SC/CWCM tables missing under %s (n=%d)", kRicohLmt.c_str(), n);
+        __android_log_print(ANDROID_LOG_ERROR, kTag, "GR SC/CWCM tables missing under %s (n=%d)", root.c_str(), n);
         return nullptr;
     }
     // Fuse: for each grid point of the output cube, F(x) = CWCM(SC(x)).

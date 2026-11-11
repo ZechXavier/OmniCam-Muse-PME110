@@ -233,7 +233,7 @@ final class GrEffectTransport {
             }
             Log.i(TAG, "MTK: GrEffect table ints=" + ints);
             if (ints.size() < 6) {
-                Log.e(TAG, "MTK: GrEffect table has only " + ints.size() + " ints, expected 6");
+                Log.i(TAG, "MTK: GrEffect table has only " + ints.size() + " ints, expected 6");
                 return null;
             }
             int clarity = ints.get(3);
