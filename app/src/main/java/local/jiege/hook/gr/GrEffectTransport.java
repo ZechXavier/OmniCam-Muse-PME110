@@ -20,11 +20,14 @@ import local.jiege.hook.common.Symbols;
  *
  * MTK (PME110, Dimensity): the QTI path (a single gr.effect.params byte[] blob) does not work
  * here -- the MTK native layer has no consumer for GR_MODE_PARAM / gr.effect, and a request
- * carrying that unknown key is silently dropped (shutter appears dead). On MTK the four
- * gr_mode_* parameters are instead passed as individual UTakePictureKeys Integers
- * (KEY_GR_MODE_CLARITY / VIGNETTE / PARTICLE_SIZE / PARTICLE_AMOUNT), which the MTK
- * doFilterProcess reads directly and which gate the Meishe filter. The byte[] blob is
- * therefore skipped on MTK, both on the capture stage and on the SDK request.
+ * carrying that unknown key is silently dropped (shutter appears dead). The STOCK
+ * GrMode.captureStage attaches that byte[] to the stage request BEFORE this module's
+ * after-hook runs, so on MTK the after-hook OVERWRITES the stock GR_MODE_PARAM with an
+ * empty Bundle (the SDK then builds an empty GrEffectParam, inert on MTK). On the SDK
+ * request the byte[] is skipped and the four gr_mode_* parameters are instead passed as
+ * individual UTakePictureKeys Integers (KEY_GR_MODE_CLARITY / VIGNETTE / PARTICLE_SIZE /
+ * PARTICLE_AMOUNT), which the MTK doFilterProcess reads directly and which gate the
+ * Meishe filter.
  */
 final class GrEffectTransport {
     private static final String TAG = "RicohGrPort";
@@ -71,15 +74,38 @@ final class GrEffectTransport {
         XposedBridge.hookMethod(symbols.method("GrMode.captureStage"), new XC_MethodHook() {
             @Override protected void afterHookedMethod(MethodHookParam param) {
                 GrState.currentMode = param.thisObject;
-                if (!GrState.isGrMode()) return;
-                // MTK (PME110): the gr.effect.params byte[] blob has no consumer in the MTK
-                // native layer and a stage carrying it is dropped. Skip it entirely; the
-                // four KEY_GR_MODE_* Integers are attached on the SDK request instead
-                // (hookSdkRequest), which is the only channel the MTK pipeline reads.
+                // MTK (PME110): the STOCK GrMode.captureStage already attached the
+                // gr.effect.params byte[] to the stage request BEFORE this after-hook
+                // runs (Lgm/k;.Eg offset 0x0054: stage.D.j(CameraParameter.GR_MODE_PARAM,
+                // bundle)). MTK has no consumer for GR_MODE_PARAM / gr.effect, so a
+                // request carrying that key is silently dropped and the shutter appears
+                // dead. Overwrite the stock bundle with an EMPTY Bundle (never null --
+                // the StageRequest impl may NPE on null): the SDK then gets null from
+                // getByteArray("gr.effect.params") and builds an empty GrEffectParam,
+                // inert on MTK. The four KEY_GR_MODE_* Integers are attached on the SDK
+                // request instead (hookSdkRequest), the only channel MTK reads.
+                // This must NOT depend on GrState.isGrMode(): isGrMode() reads the
+                // DataManager mode-name key and static analysis cannot confirm the mode
+                // switch writes "gr" there. This hook is on GrMode.captureStage, which
+                // only runs while GR mode is active, so the overwrite is safe whenever
+                // the stage runs.
                 if (IS_MTK) {
-                    Log.i(TAG, "MTK: skipping gr.effect.params stage bundle");
+                    try {
+                        Object key = XposedHelpers.getStaticObjectField(
+                            XposedHelpers.findClass("com.oplus.ocs.camera.CameraParameter", classLoader), "GR_MODE_PARAM");
+                        Object request = symbols.get("Stage.request", param.args[0]);
+                        if (request == null) {
+                            Log.i(TAG, "MTK: GR capture stage has no request builder");
+                            return;
+                        }
+                        putBundle.invoke(request, key, new Bundle());
+                        Log.i(TAG, "MTK: overwrote stock GR_MODE_PARAM with empty bundle");
+                    } catch (Throwable error) {
+                        Log.e(TAG, "MTK: GR_MODE_PARAM overwrite failed", error);
+                    }
                     return;
                 }
+                if (!GrState.isGrMode()) return;
                 try {
                     byte[] effect = loadEffectBytes(symbols);
                     if (effect == null || effect.length == 0) {
