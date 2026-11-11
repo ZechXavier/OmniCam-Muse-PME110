@@ -1463,6 +1463,50 @@
     "swapRetroLivePhotoStateIfNeeded, curMode: "
    ]
   },
+  "RetroCameraUIContainer": {
+   "kind": "class",
+   "strings": [
+    "RetroCameraUIContainer",
+    "show, needAnim: true"
+   ]
+  },
+  "RetroCameraUIContainer.f": {
+   "kind": "field",
+   "in": "@RetroCameraUIContainer",
+   "type": "bj.w"
+  },
+  "RetroCameraUIContainer.Ub": {
+   "kind": "method",
+   "in": "@RetroCameraUIContainer",
+   "params": [],
+   "ret": "int",
+   "fields": [
+    "@RetroCameraUIContainer.f"
+   ]
+  },
+  "RetroCameraUIContainer.z9": {
+   "kind": "method",
+   "in": "@RetroCameraUIContainer",
+   "params": [
+    "android.app.Activity",
+    "com.oplus.camera.protocal.ui.a"
+   ],
+   "ret": "void",
+   "fields": [
+    "@RetroCameraUIContainer.f"
+   ]
+  },
+  "RetroCameraUIContainer.Q3": {
+   "kind": "method",
+   "in": "@RetroCameraUIContainer",
+   "params": [
+    "boolean"
+   ],
+   "ret": "void",
+   "invokes": [
+    "Lk9/i;->d(J)V"
+   ]
+  },
   "SoundPlayer": {
    "kind": "class",
    "strings": [

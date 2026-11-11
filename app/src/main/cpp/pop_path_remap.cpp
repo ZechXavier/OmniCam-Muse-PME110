@@ -24,6 +24,8 @@ static int (*originalOpen)(const char *, int, ...);
 
 static constexpr char kOdmRetro[] = "/odm/etc/camera/basictone/setting_Retro";
 static constexpr char kAppRetro[] = "/data/user/0/com.oplus.camera/files/pop_port/setting_Retro";
+static constexpr char kOdmPalette[] = "/odm/etc/camera/basictone/palette";
+static constexpr char kAppPalette[] = "/data/user/0/com.oplus.camera/files/pop_port/palette";
 static constexpr char kOdmLut[] = "/odm/etc/camera/meishe_lut/";
 static constexpr char kAppLut[] = "/data/user/0/com.oplus.camera/files/pop_port/meishe_lut/";
 // Master filters the user imported in the settings app (MasterFilterSync copies them here).
@@ -63,6 +65,16 @@ static const char *remap(const char *path, char *buf, size_t n) {
     }
     if (std::strncmp(path, kOdmRetro, sizeof(kOdmRetro) - 1) == 0) {
         std::snprintf(buf, n, "%s%s", kAppRetro, path + sizeof(kOdmRetro) - 1);
+        if (destExists(buf)) {
+            return buf;
+        }
+        return path;
+    }
+    // POP palette: doBasicToneRegisterV1 takes the palette dir together with setting_Retro,
+    // and MTK has no /odm/etc/camera/basictone/palette. The staged copy is the QTI stock
+    // palette (SC16 LUTs, HDR/SDR), see service.sh. Only redirect when the target exists.
+    if (std::strncmp(path, kOdmPalette, sizeof(kOdmPalette) - 1) == 0) {
+        std::snprintf(buf, n, "%s%s", kAppPalette, path + sizeof(kOdmPalette) - 1);
         if (destExists(buf)) {
             return buf;
         }

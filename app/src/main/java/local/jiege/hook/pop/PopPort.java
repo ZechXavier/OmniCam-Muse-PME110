@@ -40,5 +40,15 @@ public final class PopPort {
         } catch (Throwable error) {
             Log.e(TAG, "POP SDR style hook unavailable", error);
         }
+        try {
+            PopUiGuard.install(classLoader);
+        } catch (Throwable error) {
+            Log.e(TAG, "POP UI guard unavailable", error);
+        }
+        try {
+            PopUiInit.install(classLoader);
+        } catch (Throwable error) {
+            Log.e(TAG, "POP UI setup watch unavailable", error);
+        }
     }
 }

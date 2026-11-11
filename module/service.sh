@@ -116,9 +116,13 @@ touch "$TILT_MARK"
 chown "$APP_UID:$APP_UID" "$PREF_FILE"
 chmod 0660 "$PREF_FILE"
 restorecon "$PREF_FILE" 2>/dev/null || true
-mkdir -p "$ASSET_DIR/setting_Retro" "$ASSET_DIR/meishe_lut" "$ASSET_DIR/pld_watermark" "$ASSET_DIR/apk_resources/json" "$ASSET_DIR/apk_resources/img" "$PLD_APP"
+mkdir -p "$ASSET_DIR/setting_Retro" "$ASSET_DIR/meishe_lut" "$ASSET_DIR/palette" "$ASSET_DIR/pld_watermark" "$ASSET_DIR/apk_resources/json" "$ASSET_DIR/apk_resources/img" "$PLD_APP"
 cp -f "$MODDIR/payload/setting_Retro/"* "$ASSET_DIR/setting_Retro/"
 cp -f "$MODDIR/payload/meishe_lut/"* "$ASSET_DIR/meishe_lut/"
+# POP palette: MTK has no /odm/etc/camera/basictone/palette, and doBasicToneRegisterV1 takes the
+# palette dir together with the settings dir. Stage the QTI stock palette (SC16 LUTs) so the
+# redirected opendir/read finds real LUTs, not an empty directory.
+cp -a "$MODDIR/payload/x10_basictone/palette/." "$ASSET_DIR/palette/"
 cp -a "$MODDIR/payload/pld_watermark/." "$ASSET_DIR/pld_watermark/"
 cp -a "$MODDIR/payload/pld_watermark/." "$PLD_APP/"
 cp -a "$MODDIR/payload/apk_resources/." "$ASSET_DIR/apk_resources/"
