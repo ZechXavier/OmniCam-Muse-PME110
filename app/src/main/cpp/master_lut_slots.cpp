@@ -188,12 +188,95 @@ float *field(void *object, size_t offset) {
 // On QTI the flag is never consulted, so the per-frame gate is unchanged there.
 std::atomic<bool> masterActiveMtk{false};
 
+// MTK GR gate (PME110): same pattern as masterActiveMtk. The Java side sets this flag while
+// the camera is in GR mode (MasterLutSlots.nativeSetGrActive, driven by the Lut3d.load hook,
+// which sees "gr" as the mode name). On QTI this flag is never set, so grFrame() is always
+// false there and GR behaviour is unchanged.
+std::atomic<bool> grActiveMtk{false};
+
 bool masterFrame() {
     if (basicToneMasterFrame()) return true;
     return !hasQtiBasicToneLib() && masterActiveMtk.load();
 }
 
+// MTK-only GR-frame gate. A frame cannot be both GR and master; callers check grFrame()
+// first so GR wins when both flags are somehow set.
+bool grFrame() {
+    return !hasQtiBasicToneLib() && grActiveMtk.load();
+}
+
+// ---- GR pre-fused SC∘CWCM table (MTK) ----
+//
+// GR's LMT is the stock LMT, so only the SC∘CWCM table needs swapping. The stock merge
+// (resize) takes an already-fused SC∘CWCM table, so we pre-fuse the GR SC and CWCM tables
+// (neutral/default GR params: Cont=0/Sat=0/CoWa=0/CyMa=0) into one table and cache it per
+// size. Fusion is F(x) = CWCM(SC(x)) with tetrahedral lookup, the same interpolation as
+// BasicTone::MergeLutTet (Cube::lookup).
+//
+// Table index assumption (to verify on device): the 9 SC/CWCM tables form a 3x3 grid and
+// Lut4 is the neutral (0,0) node. This is confirmed for SC by contrastStage (SC16Lut3/4/5
+// = Cont -100/0/+100 at Sat 0); CWCM is assumed to follow the same layout (CWCM16Lut4 =
+// CoWa 0 / CyMa 0). If GR photos come out with the wrong colour balance, this index is
+// the first thing to re-check.
+std::mutex grTableMutex;
+std::shared_ptr<const Cube> grScCwcm16;
+std::shared_ptr<const Cube> grScCwcm32;
+
+std::shared_ptr<const Cube> grScCwcmTable(int n) {
+    std::shared_ptr<const Cube> *slot = (n == 32) ? &grScCwcm32 : &grScCwcm16;
+    {
+        std::lock_guard<std::mutex> lock(grTableMutex);
+        if (*slot) return *slot;
+    }
+    // Load the neutral GR SC and CWCM tables (16 or 32 to match the requested size).
+    std::string suffix = (n == 32) ? "32" : "16";
+    Cube sc, cwcm;
+    std::string root = kRicohLmt;
+    if (!readCube(root + "/SC" + suffix + "Lut4", n, sc) || !readCube(root + "/CWCM" + suffix + "Lut4", n, cwcm)) {
+        __android_log_print(ANDROID_LOG_ERROR, kTag, "GR SC/CWCM tables missing under %s (n=%d)", kRicohLmt.c_str(), n);
+        return nullptr;
+    }
+    // Fuse: for each grid point of the output cube, F(x) = CWCM(SC(x)).
+    auto fused = std::make_shared<Cube>();
+    fused->n = n;
+    int plane = n * n * n;
+    fused->v.assign(3 * static_cast<size_t>(plane), 0.0f);
+    for (int b = 0; b < n; ++b) {
+        for (int g = 0; g < n; ++g) {
+            for (int r = 0; r < n; ++r) {
+                float in[3] = {static_cast<float>(r) / (n - 1), static_cast<float>(g) / (n - 1),
+                               static_cast<float>(b) / (n - 1)};
+                float mid[3], out[3];
+                sc.lookup(in, mid);
+                cwcm.lookup(mid, out);
+                int idx = b * n * n + g * n + r;
+                fused->v[idx] = out[0];
+                fused->v[idx + plane] = out[1];
+                fused->v[idx + 2 * plane] = out[2];
+            }
+        }
+    }
+    __android_log_print(ANDROID_LOG_INFO, kTag, "GR SC∘CWCM pre-fused (n=%d)", n);
+    {
+        std::lock_guard<std::mutex> lock(grTableMutex);
+        if (!*slot) *slot = fused;
+        return *slot;
+    }
+}
+
 uintptr_t resize(void *object, float *src, float *lut, float *dst, int nSrc, int nLut) {
+    // MTK GR (PME110): swap the SC∘CWCM table for the pre-fused GR table. GR's LMT is the
+    // stock LMT, so src is left alone; only lut is replaced. This runs before the master
+    // branch and is mutually exclusive with it (a frame is either GR or master, never both).
+    // The ODT branch is left untouched: GR does not replace the ODT table.
+    if (grFrame() && src == field(object, kLmtTable) && lut == field(object, kScCwcmTable)) {
+        auto gr = grScCwcmTable(nLut);
+        if (gr) {
+            __android_log_print(ANDROID_LOG_INFO, kTag, "GR resize src==LMT lut==SC∘CWCM (nSrc=%d nLut=%d)", nSrc, nLut);
+            return originalResize(object, src, const_cast<float *>(gr->v.data()), dst, nSrc, nLut);
+        }
+        __android_log_print(ANDROID_LOG_ERROR, kTag, "GR resize: fused table unavailable, falling through to stock");
+    }
     auto active = slots();
     if (!masterFrame() || (active->pre.empty() && active->post.empty()) || src != field(object, kLmtTable)) {
         return originalResize(object, src, lut, dst, nSrc, nLut);
@@ -214,6 +297,32 @@ uintptr_t resize(void *object, float *src, float *lut, float *dst, int nSrc, int
 }
 
 uintptr_t load3D(void *object, float *src, void *dst, int n) {
+    // MTK GR (PME110): load3D is taken when every stock adjustment is zero and ODT is off,
+    // so the merge in resize() is bypassed and the LMT is loaded directly. Bake the GR
+    // SC∘CWCM into the LMT here (LMT' = GR-SC∘CWCM(LMT)) so the GR look still applies.
+    // NOTE (to verify on device): this assumes the load3D path is the all-zero/ODT-off path
+    // for GR frames too. If GR photos come out without the GR look while resize() logs show
+    // the GR branch firing, revisit whether load3D or resize() is the path actually taken.
+    if (grFrame() && src == field(object, kLmtTable)) {
+        auto gr = grScCwcmTable(n);
+        if (gr) {
+            int count = n * n * n;
+            std::vector<float> input(3 * static_cast<size_t>(count));
+            std::memcpy(input.data(), src, 3 * static_cast<size_t>(count) * sizeof(float));
+            // Apply the fused GR SC∘CWCM to each LMT entry via tetrahedral lookup.
+            for (int i = 0; i < count; ++i) {
+                float rgb[3] = {input[i], input[i + count], input[i + 2 * count]};
+                float out[3];
+                gr->lookup(rgb, out);
+                input[i] = out[0];
+                input[i + count] = out[1];
+                input[i + 2 * count] = out[2];
+            }
+            __android_log_print(ANDROID_LOG_INFO, kTag, "GR load3D LMT baked with GR SC∘CWCM (n=%d)", n);
+            return originalLoad3D(object, input.data(), dst, n);
+        }
+        __android_log_print(ANDROID_LOG_ERROR, kTag, "GR load3D: fused table unavailable, falling through to stock");
+    }
     auto active = slots();
     if (!masterFrame() || (active->pre.empty() && active->post.empty()) || src != field(object, kLmtTable)) {
         return originalLoad3D(object, src, dst, n);
@@ -282,6 +391,18 @@ Java_local_jiege_hook_masterlut_MasterLutSlots_nativePreviewBegin(JNIEnv *, jcla
 extern "C" JNIEXPORT void JNICALL
 Java_local_jiege_hook_masterlut_MasterLutSlots_nativeSetMasterActive(JNIEnv *, jclass, jboolean master) {
     masterActiveMtk.store(master == JNI_TRUE);
+}
+
+// MTK GR-capture gate (see grFrame): the Java side sets this while in GR mode.
+// Mirrors nativeSetMasterActive; the JNI name must match the Java declaration exactly:
+// local.jiege.hook.masterlut.MasterLutSlots.nativeSetGrActive(boolean).
+extern "C" JNIEXPORT void JNICALL
+Java_local_jiege_hook_masterlut_MasterLutSlots_nativeSetGrActive(JNIEnv *, jclass, jboolean gr) {
+    bool active = (gr == JNI_TRUE);
+    if (grActiveMtk.load() != active) {
+        __android_log_print(ANDROID_LOG_INFO, kTag, "GR active=%d", active ? 1 : 0);
+    }
+    grActiveMtk.store(active);
 }
 
 // The returned preview table (interleaved RGB, size³ entries). When the stock skipped the merge (every

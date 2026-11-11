@@ -29,7 +29,14 @@ final class GrMasterEffectEntry {
         });
         XposedBridge.hookMethod(symbols.method("CaptureParams.refreshEffectEntry"), new XC_MethodHook() {
             @Override protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                if (!"gr".equals(symbols.get("FeaturePresenter.modeName", param.thisObject))) refreshing.set(Boolean.TRUE);
+                // MTK GR (PME110): refreshEffectEntry() returns at once when GrSupport.supported()
+                // is true, so in GR mode the bottom effect-entry button (Std) never refreshes and
+                // its state machine goes stale -- the panel cannot be opened. The existing hook
+                // already makes supported() answer false for the duration of a refresh, but only
+                // when the mode is NOT "gr". Extend that to GR mode too, so the button refreshes
+                // in GR as well. This is the minimal change: it reuses the same mechanism for
+                // both modes instead of adding a separate forced refresh.
+                refreshing.set(Boolean.TRUE);
             }
 
             @Override protected void afterHookedMethod(MethodHookParam param) {

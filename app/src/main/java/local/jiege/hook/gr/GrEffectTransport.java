@@ -17,10 +17,21 @@ import local.jiege.hook.common.Symbols;
  * Preview: the combined-LUT helper is pointed at the GR LMT tree staged by service.sh.
  * Capture: the GR style panel's encoded parameter struct is attached to the capture stage and
  * the SDK request, where the native half (gr_basictone.cpp) and APS read it.
+ *
+ * MTK (PME110, Dimensity): the QTI path (a single gr.effect.params byte[] blob) does not work
+ * here -- the MTK native layer has no consumer for GR_MODE_PARAM / gr.effect, and a request
+ * carrying that unknown key is silently dropped (shutter appears dead). On MTK the four
+ * gr_mode_* parameters are instead passed as individual UTakePictureKeys Integers
+ * (KEY_GR_MODE_CLARITY / VIGNETTE / PARTICLE_SIZE / PARTICLE_AMOUNT), which the MTK
+ * doFilterProcess reads directly and which gate the Meishe filter. The byte[] blob is
+ * therefore skipped on MTK, both on the capture stage and on the SDK request.
  */
 final class GrEffectTransport {
     private static final String TAG = "RicohGrPort";
     private static final String GR_LMT_DIR = "/data/user/0/com.oplus.camera/files/ricoh_gr/lmt";
+    // MTK detection, same pattern as SoftLightScreen.kt: the QTI BasicTone backend
+    // (libBasicTonePhotoX9.so) is absent on MTK devices.
+    private static final boolean IS_MTK = !new java.io.File("/odm/lib64/libBasicTonePhotoX9.so").exists();
 
     private GrEffectTransport() {}
 
@@ -61,6 +72,14 @@ final class GrEffectTransport {
             @Override protected void afterHookedMethod(MethodHookParam param) {
                 GrState.currentMode = param.thisObject;
                 if (!GrState.isGrMode()) return;
+                // MTK (PME110): the gr.effect.params byte[] blob has no consumer in the MTK
+                // native layer and a stage carrying it is dropped. Skip it entirely; the
+                // four KEY_GR_MODE_* Integers are attached on the SDK request instead
+                // (hookSdkRequest), which is the only channel the MTK pipeline reads.
+                if (IS_MTK) {
+                    Log.i(TAG, "MTK: skipping gr.effect.params stage bundle");
+                    return;
+                }
                 try {
                     byte[] effect = loadEffectBytes(symbols);
                     if (effect == null || effect.length == 0) {
@@ -87,6 +106,20 @@ final class GrEffectTransport {
         XposedBridge.hookAllMethods(grCapMode, "updateCaptureRequestTag", new XC_MethodHook() {
             @Override protected void beforeHookedMethod(MethodHookParam param) {
                 if (param.args.length != 3 || !GrState.isGrMode()) return;
+                // MTK (PME110): do NOT attach the gr.effect.params byte[] blob. The MTK native
+                // layer has no consumer for it and a request carrying that unknown key is
+                // silently dropped at the SDK/APS boundary (shutter does nothing). Instead
+                // attach the four gr_mode_* parameters as individual Integers, which the MTK
+                // doFilterProcess reads directly (any of clarity/vignette/particle_amount
+                // non-zero runs the Meishe filter for grain/vignette/clarity).
+                if (IS_MTK) {
+                    try {
+                        attachGrModeInts(symbols, classLoader, param.args[0]);
+                    } catch (Throwable error) {
+                        Log.e(TAG, "GR MTK param attach failed", error);
+                    }
+                    return;
+                }
                 try {
                     Object builder = param.args[0];
                     Object key = XposedHelpers.getStaticObjectField(
@@ -101,6 +134,10 @@ final class GrEffectTransport {
 
             @Override protected void afterHookedMethod(MethodHookParam param) {
                 if (param.args.length != 3 || !GrState.isGrMode()) return;
+                // MTK (PME110): the GrEffectParam tag carries the same byte[] blob, which the
+                // MTK pipeline does not consume. Skip it; the four KEY_GR_MODE_* Integers
+                // attached in beforeHookedMethod are the MTK channel.
+                if (IS_MTK) return;
                 try {
                     Object tag = param.args[1];
                     Object current = XposedHelpers.getObjectField(tag, "mGrEffectParam");
@@ -116,6 +153,109 @@ final class GrEffectTransport {
                 }
             }
         });
+    }
+
+    /**
+     * MTK (PME110): attach the four gr_mode_* parameters as individual Integers on the
+     * capture-request builder. The keys are UTakePictureKeys.KEY_GR_MODE_* (PreviewKey),
+     * verified present in the PME110 camera APK's SDK (com.oplus.camera.unit.sdk.jar).
+     * Values come from the GR style panel's GrEffect (see grEffectInts). Each set() is
+     * guarded individually so one missing key does not drop the other three.
+     */
+    private static void attachGrModeInts(Symbols symbols, ClassLoader classLoader, Object builder) throws Throwable {
+        int[] values = grEffectInts(symbols);
+        if (values == null) {
+            Log.i(TAG, "MTK: no GR effect values, skipping KEY_GR_MODE_* attach");
+            return;
+        }
+        String[] keys = {"KEY_GR_MODE_CLARITY", "KEY_GR_MODE_VIGNETTE", "KEY_GR_MODE_PARTICLE_SIZE", "KEY_GR_MODE_PARTICLE_AMOUNT"};
+        Class<?> takeKeys = XposedHelpers.findClass("com.oplus.ocs.camera.metadata.UTakePictureKeys", classLoader);
+        for (int i = 0; i < keys.length; i++) {
+            try {
+                Object key = XposedHelpers.getStaticObjectField(takeKeys, keys[i]);
+                XposedHelpers.callMethod(builder, "set", key, values[i]);
+            } catch (Throwable error) {
+                Log.e(TAG, "MTK: set " + keys[i] + " failed", error);
+            }
+        }
+        Log.i(TAG, "MTK: KEY_GR_MODE_* clarity=" + values[0] + " vignette=" + values[1]
+            + " particleSize=" + values[2] + " particleAmount=" + values[3]);
+    }
+
+    /**
+     * Splits the four Meishe parameters out of the GR style panel's GrEffect, in the order
+     * the MTK doFilterProcess expects them: clarity, vignette, particle size, particle amount.
+     *
+     * How the values are read (verified against the PME110 camera APK, 7.006.121):
+     * the GrEffect object holds its parameters in a nested table object (GrEffect.a()),
+     * whose superclass declares six int fields (b, c, d, e, f, g) in declaration order.
+     * The GR settings are listed in that same order in the module (saturation, tone,
+     * contrast, clarity, vignette, grain), so clarity is the 4th int, vignette the 5th,
+     * and the grain value the 6th.
+     *
+     * ASSUMPTION TO VERIFY ON DEVICE (the field names are obfuscated single letters, so
+     * the mapping cannot be proven statically): clarity = ints[3], vignette = ints[4],
+     * grain = ints[5]. Particle size and particle amount are both driven from the single
+     * grain value -- the panel exposes one grain control and the native size/amount split
+     * is approximated by using the same value for both. The attached log line prints all
+     * six ints, so a single logcat run shows whether the mapping is right; if GR photos
+     * come out with the wrong grain/vignette/clarity, adjust the indices here.
+     * Returns null when the GrEffect cannot be read at all (caller then skips the attach
+     * rather than sending made-up values, except that a null here only skips the Meishe
+     * params -- the shutter itself is already fixed by dropping the byte[] blob).
+     */
+    private static int[] grEffectInts(Symbols symbols) {
+        try {
+            Object effect = grEffectObject(symbols);
+            if (effect == null) return null;
+            Object table = null;
+            try {
+                table = XposedHelpers.callMethod(effect, "a");
+            } catch (Throwable ignored) {
+                table = XposedHelpers.getObjectField(effect, "a");
+            }
+            if (table == null) {
+                Log.i(TAG, "MTK: GrEffect table object is null");
+                return null;
+            }
+            // The six ints live on the table's superclass; read them sorted by field name.
+            // getDeclaredFields() order is not guaranteed, but the fields are named b..g
+            // (single letters, confirmed in the 7.006.121 dex), so sorting by name recovers
+            // declaration order deterministically.
+            java.lang.reflect.Field[] fields = table.getClass().getSuperclass().getDeclaredFields();
+            java.util.Arrays.sort(fields, (x, y) -> x.getName().compareTo(y.getName()));
+            java.util.ArrayList<Integer> ints = new java.util.ArrayList<>();
+            for (java.lang.reflect.Field f : fields) {
+                if (f.getType() == int.class) {
+                    f.setAccessible(true);
+                    ints.add(f.getInt(table));
+                }
+            }
+            Log.i(TAG, "MTK: GrEffect table ints=" + ints);
+            if (ints.size() < 6) {
+                Log.e(TAG, "MTK: GrEffect table has only " + ints.size() + " ints, expected 6");
+                return null;
+            }
+            int clarity = ints.get(3);
+            int vignette = ints.get(4);
+            int grain = ints.get(5);
+            return new int[]{clarity, vignette, grain, grain};
+        } catch (Throwable error) {
+            Log.e(TAG, "MTK: grEffectInts failed", error);
+            return null;
+        }
+    }
+
+    /** The current GrEffect: the style panel's, or the default effect table's. */
+    private static Object grEffectObject(Symbols symbols) throws Throwable {
+        Object presenter = GrModeHooks.captureParams(symbols);
+        if (presenter == null) return null;
+        Object panel = Reflection.findFieldByType(presenter, symbols.cls("GrStylePanel").getName());
+        if (panel != null) return symbols.call("GrStylePanel.effect", panel);
+        Class<?> tableType = symbols.cls("GrEffectTable");
+        Object table = Reflection.findFieldByType(presenter, tableType.getName());
+        if (table == null) table = XposedHelpers.newInstance(tableType);
+        return XposedHelpers.newInstance(symbols.cls("GrEffect"), table);
     }
 
     private static Bundle effectBundle(byte[] effect) {

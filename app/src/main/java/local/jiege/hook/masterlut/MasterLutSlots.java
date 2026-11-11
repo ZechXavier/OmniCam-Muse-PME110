@@ -35,6 +35,10 @@ public final class MasterLutSlots {
     // MTK capture gate (native master_lut_slots.cpp): true while the camera is in master mode,
     // so the capture slots apply. On QTI the native side ignores it (per-frame gate instead).
     private static native void nativeSetMasterActive(boolean master);
+    // MTK GR gate (native master_lut_slots.cpp): true while the camera is in GR mode, so the
+    // GR SC∘CWCM table is swapped in resize()/load3D(). Mirrors nativeSetMasterActive; the
+    // JNI name must match the C++ JNIEXPORT exactly. On QTI this flag is never set.
+    private static native void nativeSetGrActive(boolean gr);
     private static native void nativePreviewEnd(float[] table, int size);
 
     public static void installCamera(ClassLoader classLoader) {
@@ -45,6 +49,10 @@ public final class MasterLutSlots {
                 lut3d = param.thisObject;
                 previewMode = (String) param.args[2];
                 Log.guard(TAG, "master active", () -> nativeSetMasterActive(FilterScope.MASTER_MODE.equals(previewMode)));
+                // MTK GR (PME110): Lut3d.load's mode arg is still "gr" here even though
+                // GrModeHooks rewrites CameraEntry.enter("gr") to "professional" elsewhere,
+                // so "gr".equals(previewMode) reliably identifies GR frames.
+                Log.guard(TAG, "gr active", () -> nativeSetGrActive("gr".equals(previewMode)));
             }
         }));
         Log.guard(TAG, "preview table", () -> XposedBridge.hookAllMethods(XposedHelpers.findClass(COMBINER, classLoader), "process",
