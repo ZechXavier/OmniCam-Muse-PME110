@@ -183,12 +183,25 @@ final class GrModeHooks {
      * GrSupport.supported(), not from the current mode. With GR enabled, master mode would
      * otherwise restore the GR effect values into its BasicTone axes, so outside GR, supported()
      * answers false for the duration of restoreEffects().
+     *
+     * PME110 root cause (2026-11-12): the mode factory only instantiates GrMode
+     * (Lgm/k) when GrSupport.supported() is true -- it reads the device config key
+     * "com.oplus.gr.mode.support". The stock PME110 config says GR is unsupported,
+     * so GrMode was never created, GrMode.captureStage never ran, the RicohGrPort
+     * hook never fired, and the GR shutter was dead (no log lines at all, not even
+     * an error). Forcing supported() true makes the factory build a real GrMode.
+     * On devices where GR is natively supported this is a no-op (the config already
+     * returns true). The restoreEffects() exception below is preserved.
      */
     private static void hookMasterEffectBranch(final Symbols symbols) {
         final ThreadLocal<Boolean> restoringOutsideGr = new ThreadLocal<>();
         XposedBridge.hookMethod(symbols.method("GrSupport.supported"), new XC_MethodHook() {
             @Override protected void beforeHookedMethod(MethodHookParam param) {
-                if (Boolean.TRUE.equals(restoringOutsideGr.get())) param.setResult(Boolean.FALSE);
+                if (Boolean.TRUE.equals(restoringOutsideGr.get())) {
+                    param.setResult(Boolean.FALSE);
+                } else {
+                    param.setResult(Boolean.TRUE);
+                }
             }
         });
         XposedBridge.hookMethod(symbols.method("CaptureParams.restoreEffects"), new XC_MethodHook() {
