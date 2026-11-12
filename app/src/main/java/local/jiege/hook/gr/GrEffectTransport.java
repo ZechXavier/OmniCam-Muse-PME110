@@ -23,11 +23,16 @@ import local.jiege.hook.common.Symbols;
  * carrying that unknown key is silently dropped (shutter appears dead). The STOCK
  * GrMode.captureStage attaches that byte[] to the stage request BEFORE this module's
  * after-hook runs, so on MTK the after-hook OVERWRITES the stock GR_MODE_PARAM with an
- * empty Bundle (the SDK then builds an empty GrEffectParam, inert on MTK). On the SDK
- * request the byte[] is skipped and the four gr_mode_* parameters are instead passed as
- * individual UTakePictureKeys Integers (KEY_GR_MODE_CLARITY / VIGNETTE / PARTICLE_SIZE /
- * PARTICLE_AMOUNT), which the MTK doFilterProcess reads directly and which gate the
- * Meishe filter.
+ * empty Bundle (the SDK then builds an empty GrEffectParam, inert on MTK). The four
+ * gr_mode_* parameters are instead set through the camera's own live session channel:
+ * the GR mode's BaseMode.W0 (Lbb/b1).e(CameraParameter.KEY_GR_MODE_*, Integer) -- the
+ * same call the stock GrMode.f3() makes, and the keys live on CameraParameter (the
+ * UTakePictureKeys class does not exist on 7.006.121, and CameraParameter$PreviewKey
+ * is not a RequestKey, so the request-builder set() channel cannot take them). The
+ * MTK doFilterProcess reads those parameters from the live session and they gate the
+ * Meishe filter. The attach runs in the capture-stage after-hook (always) and again
+ * in the SDK request hook (if GRCapMode resolves), so it does not depend on the SDK
+ * jar being loadable.
  */
 final class GrEffectTransport {
     private static final String TAG = "RicohGrPort";
@@ -96,12 +101,20 @@ final class GrEffectTransport {
                         Object request = symbols.get("Stage.request", param.args[0]);
                         if (request == null) {
                             Log.i(TAG, "MTK: GR capture stage has no request builder");
-                            return;
+                        } else {
+                            putBundle.invoke(request, key, new Bundle());
+                            Log.i(TAG, "MTK: overwrote stock GR_MODE_PARAM with empty bundle");
                         }
-                        putBundle.invoke(request, key, new Bundle());
-                        Log.i(TAG, "MTK: overwrote stock GR_MODE_PARAM with empty bundle");
                     } catch (Throwable error) {
                         Log.e(TAG, "MTK: GR_MODE_PARAM overwrite failed", error);
+                    }
+                    // The four gr_mode_* Integers go through the live session channel
+                    // (BaseMode.W0.e), not the stage request -- see attachGrModeInts.
+                    // Runs here so the attach does not depend on GRCapMode resolving.
+                    try {
+                        attachGrModeInts(symbols, classLoader);
+                    } catch (Throwable error) {
+                        Log.e(TAG, "GR MTK param attach failed", error);
                     }
                     return;
                 }
@@ -131,21 +144,26 @@ final class GrEffectTransport {
         Class<?> grCapMode = XposedHelpers.findClass("com.oplus.ocs.camera.producer.mode.GRCapMode", classLoader);
         XposedBridge.hookAllMethods(grCapMode, "updateCaptureRequestTag", new XC_MethodHook() {
             @Override protected void beforeHookedMethod(MethodHookParam param) {
-                if (param.args.length != 3 || !GrState.isGrMode()) return;
+                if (param.args.length != 3) return;
                 // MTK (PME110): do NOT attach the gr.effect.params byte[] blob. The MTK native
                 // layer has no consumer for it and a request carrying that unknown key is
                 // silently dropped at the SDK/APS boundary (shutter does nothing). Instead
-                // attach the four gr_mode_* parameters as individual Integers, which the MTK
-                // doFilterProcess reads directly (any of clarity/vignette/particle_amount
-                // non-zero runs the Meishe filter for grain/vignette/clarity).
+                // attach the four gr_mode_* parameters through the live session channel
+                // (BaseMode.W0.e), which the MTK doFilterProcess reads directly (any of
+                // clarity/vignette/particle_amount non-zero runs the Meishe filter for
+                // grain/vignette/clarity). This must NOT depend on GrState.isGrMode():
+                // isGrMode() reads the DataManager mode-name key and static analysis cannot
+                // confirm the mode switch writes "gr" there; updateCaptureRequestTag on
+                // GRCapMode only runs for GR captures anyway.
                 if (IS_MTK) {
                     try {
-                        attachGrModeInts(symbols, classLoader, param.args[0]);
+                        attachGrModeInts(symbols, classLoader);
                     } catch (Throwable error) {
                         Log.e(TAG, "GR MTK param attach failed", error);
                     }
                     return;
                 }
+                if (!GrState.isGrMode()) return;
                 try {
                     Object builder = param.args[0];
                     Object key = XposedHelpers.getStaticObjectField(
@@ -182,24 +200,44 @@ final class GrEffectTransport {
     }
 
     /**
-     * MTK (PME110): attach the four gr_mode_* parameters as individual Integers on the
-     * capture-request builder. The keys are UTakePictureKeys.KEY_GR_MODE_* (PreviewKey),
-     * verified present in the PME110 camera APK's SDK (com.oplus.camera.unit.sdk.jar).
-     * Values come from the GR style panel's GrEffect (see grEffectInts). Each set() is
-     * guarded individually so one missing key does not drop the other three.
+     * MTK (PME110): set the four gr_mode_* parameters through the camera's own live
+     * session channel -- the GR mode's BaseMode.W0 (Lbb/b1).e(PreviewKey, Integer).
+     * The keys are CameraParameter.KEY_GR_MODE_* (the UTakePictureKeys class does not
+     * exist on 7.006.121, and CameraParameter$PreviewKey is not a RequestKey, so the
+     * request-builder set() channel cannot take them). This is the same call the stock
+     * GrMode.f3() makes when the style changes, and the MTK doFilterProcess reads the
+     * parameters from the live session. Values come from the GR style panel's GrEffect
+     * (see grEffectInts). Each e() is guarded individually so one missing key does not
+     * drop the other three.
      */
-    private static void attachGrModeInts(Symbols symbols, ClassLoader classLoader, Object builder) throws Throwable {
+    private static void attachGrModeInts(Symbols symbols, ClassLoader classLoader) throws Throwable {
         int[] values = grEffectInts(symbols);
         if (values == null) {
             Log.i(TAG, "MTK: no GR effect values, skipping KEY_GR_MODE_* attach");
             return;
         }
+        Object mode = GrState.currentMode;
+        if (mode == null) {
+            Log.i(TAG, "MTK: no current GR mode, skipping KEY_GR_MODE_* attach");
+            return;
+        }
+        Object session;
+        try {
+            session = XposedHelpers.getObjectField(mode, "W0");
+        } catch (Throwable error) {
+            Log.e(TAG, "MTK: BaseMode.W0 unreadable", error);
+            return;
+        }
+        if (session == null) {
+            Log.i(TAG, "MTK: BaseMode.W0 is null, skipping KEY_GR_MODE_* attach");
+            return;
+        }
         String[] keys = {"KEY_GR_MODE_CLARITY", "KEY_GR_MODE_VIGNETTE", "KEY_GR_MODE_PARTICLE_SIZE", "KEY_GR_MODE_PARTICLE_AMOUNT"};
-        Class<?> takeKeys = XposedHelpers.findClass("com.oplus.ocs.camera.metadata.UTakePictureKeys", classLoader);
+        Class<?> cameraParameter = XposedHelpers.findClass("com.oplus.ocs.camera.CameraParameter", classLoader);
         for (int i = 0; i < keys.length; i++) {
             try {
-                Object key = XposedHelpers.getStaticObjectField(takeKeys, keys[i]);
-                XposedHelpers.callMethod(builder, "set", key, values[i]);
+                Object key = XposedHelpers.getStaticObjectField(cameraParameter, keys[i]);
+                XposedHelpers.callMethod(session, "e", key, Integer.valueOf(values[i]));
             } catch (Throwable error) {
                 Log.e(TAG, "MTK: set " + keys[i] + " failed", error);
             }

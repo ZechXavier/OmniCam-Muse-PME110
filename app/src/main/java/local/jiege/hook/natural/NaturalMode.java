@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import local.jiege.hook.common.Log;
 import local.jiege.hook.common.Settings;
+import local.jiege.hook.filters.FilterScope;
 import local.jiege.settings.ModuleSettings;
 
 /**
@@ -44,7 +45,7 @@ public final class NaturalMode {
                 @Override protected void beforeHookedMethod(MethodHookParam param) {
                     String to = (String) param.args[1];
                     if (to != null && !to.isEmpty())
-                        setSoftenMode(!"professional".equals(to) && !"gr".equals(to));
+                        setSoftenMode(!FilterScope.isMasterMode(to) && !"gr".equals(to));
                 }
             }));
         Log.guard(TAG, "settings sync", () -> XposedBridge.hookAllMethods(CaptureRequest.Builder.class, "build",

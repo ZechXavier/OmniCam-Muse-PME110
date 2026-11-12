@@ -21,6 +21,7 @@ import java.util.Locale;
 import local.jiege.hook.common.Log;
 import local.jiege.hook.common.Settings;
 import local.jiege.hook.common.Symbols;
+import local.jiege.hook.filters.FilterScope;
 import local.jiege.settings.MasterAlign;
 import local.jiege.settings.MasterLooks;
 import local.jiege.settings.ModuleSettings;
@@ -42,7 +43,6 @@ import local.jiege.settings.ModuleSettings;
  */
 public final class MasterColor {
     private static final String TAG = "MasterColor";
-    private static final String MASTER_MODE = "professional";
     private static final String ROOT = "/data/user/0/com.oplus.camera/files/jiege/mastercolor";
     private static final String LIVE = ROOT + "/live/";
     private static final int PREVIEW_INTERVAL_MS = 200;
@@ -55,6 +55,14 @@ public final class MasterColor {
     private static final long SETTING_INTERVAL_MS = 1000;
 
     private static final CaptureResult.Key<Integer> AWB_CCT = key("org.quic.camera2.statsconfigs.AWBFrameControlCCT", Integer.class);
+    // MTK (PME110): the quic tag does not exist in the MTK vendor tag descriptor, so
+    // get(AWB_CCT) throws IllegalArgumentException every frame and the whole frame's master
+    // colour processing used to abort. The camera's own keys holder (Lbb/r;.D2) defines
+    // "com.oplus.awb.colorsensor.CCT" as a CaptureResult.Key<float[]>; the camera reads
+    // element 0 as the sensor CCT (DcsDataCollectorImpl.getFloatFromCaptureResult, index 0).
+    private static final CaptureResult.Key<float[]> OPLUS_CCT = key("com.oplus.awb.colorsensor.CCT", float[].class);
+    private static final int CCT_FALLBACK_K = 5000;
+    private static volatile boolean cctFallbackLogged;
 
     private static volatile boolean enabled = true;
     private static volatile String look;
@@ -189,8 +197,8 @@ public final class MasterColor {
             @Override protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                 syncSetting();
                 manager = param.thisObject;
-                boolean master = MASTER_MODE.equals(param.args[2]);
-                boolean wasMaster = MASTER_MODE.equals(symbols.get("Lut3d.mode", param.thisObject));
+                boolean master = FilterScope.isMasterMode(param.args[2]);
+                boolean wasMaster = FilterScope.isMasterMode(symbols.get("Lut3d.mode", param.thisObject));
                 inMaster = master;
                 if (master) lastLoadArgs = param.args.clone();
                 String dir = master && enabled ? previewDir : null;
@@ -292,7 +300,7 @@ public final class MasterColor {
             @Override protected void beforeHookedMethod(MethodHookParam param) {
                 String to = (String) param.args[1];
                 if (to == null || to.isEmpty()) return;
-                boolean master = MASTER_MODE.equals(to);
+                boolean master = FilterScope.isMasterMode(to);
                 if (master == inMaster) return;
                 inMaster = master;
                 if (!master) leaveMaster();
@@ -330,6 +338,43 @@ public final class MasterColor {
 
     private static <T> T read(Object metadata, CaptureResult.Key<T> key) {
         return ((CaptureResult) metadata).get(key);
+    }
+
+    /**
+     * CCT for the frame. QTI first (the quic tag), then the OPlus colour-sensor tag on MTK,
+     * then the last good bucket or a fixed 5000K. Never throws and never aborts the frame:
+     * the quic read throws IllegalArgumentException on MTK (the tag is absent from the MTK
+     * vendor tag descriptor), which used to kill the whole frame's master colour processing.
+     */
+    private static int readCct(Object metadata) {
+        try {
+            Integer cct = read(metadata, AWB_CCT);
+            if (cct != null && cct >= 1500 && cct <= 20000) return cct;
+        } catch (Throwable ignored) {
+            // QTI tag absent on MTK; fall through to the OPlus tag.
+        }
+        try {
+            float[] oplus = read(metadata, OPLUS_CCT);
+            if (oplus != null && oplus.length > 0) {
+                int cct = Math.round(oplus[0]);
+                if (cct >= 1500 && cct <= 20000) {
+                    logCctFallback("oplus colour-sensor CCT");
+                    return cct;
+                }
+            }
+        } catch (Throwable ignored) {
+            // OPlus tag absent too; fall through to the last value / fixed 5000K.
+        }
+        logCctFallback("fixed 5000K");
+        return previewCct > 0 ? previewCct : CCT_FALLBACK_K;
+    }
+
+    /** Logs the CCT fallback source once (not every frame). */
+    private static void logCctFallback(String source) {
+        if (!cctFallbackLogged) {
+            cctFallbackLogged = true;
+            Log.i(TAG, "CCT source: " + source + " (quic tag unavailable)");
+        }
     }
 
     // Scene front stage lenses (scene.bin, tools/mastercolor/export_scene.py): the 35 mm equivalent focal length
@@ -406,9 +451,9 @@ public final class MasterColor {
         }
         previewResultAt = now;
         String lens = lens(id);
-        Integer cct = (Integer) read(metadata, AWB_CCT);
+        int cct = readCct(metadata);
         float[] ccm = matrix((ColorSpaceTransform) read(metadata, CaptureResult.COLOR_CORRECTION_TRANSFORM));
-        if (lens == null || cct == null || cct < 1500 || cct > 20000 || ccm == null) {
+        if (lens == null || ccm == null) {
             clearPreview("preview: incomplete colour metadata for camera " + id); return;
         }
         for (int i = 0; i < ccm.length; ++i) ccm[i] = Math.round(ccm[i] * 256f) / 256f;

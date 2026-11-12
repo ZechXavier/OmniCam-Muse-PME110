@@ -48,7 +48,7 @@ public final class MasterLutSlots {
             @Override protected void beforeHookedMethod(MethodHookParam param) {
                 lut3d = param.thisObject;
                 previewMode = (String) param.args[2];
-                Log.guard(TAG, "master active", () -> nativeSetMasterActive(FilterScope.MASTER_MODE.equals(previewMode)));
+                Log.guard(TAG, "master active", () -> nativeSetMasterActive(FilterScope.isMasterMode(previewMode)));
                 // MTK GR (PME110): Lut3d.load's mode arg is still "gr" here even though
                 // GrModeHooks rewrites CameraEntry.enter("gr") to "professional" elsewhere,
                 // so "gr".equals(previewMode) reliably identifies GR frames.
@@ -58,7 +58,7 @@ public final class MasterLutSlots {
         Log.guard(TAG, "preview table", () -> XposedBridge.hookAllMethods(XposedHelpers.findClass(COMBINER, classLoader), "process",
             new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam param) {
-                    boolean master = FilterScope.MASTER_MODE.equals(previewMode);
+                    boolean master = FilterScope.isMasterMode(previewMode);
                     nativePreviewBegin(master);
                     Log.guard(TAG, "master active", () -> nativeSetMasterActive(master));
                 }
@@ -83,7 +83,7 @@ public final class MasterLutSlots {
         final Object target = lut3d;
         // As the stock adjustments: their value callbacks recombine on the calling thread, so a drag
         // updates the preview live.
-        if (target == null || !FilterScope.MASTER_MODE.equals(previewMode)) return;
+        if (target == null || !FilterScope.isMasterMode(previewMode)) return;
         try {
             Symbols.get().call("Lut3d.update", target);
         } catch (Throwable error) {

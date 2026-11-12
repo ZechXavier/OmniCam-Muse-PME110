@@ -46,7 +46,7 @@ public final class SoftLight {
         for (String stage : new String[] {"FilterPresenter.apply", "FilterPresenter.captureRequest"}) {
             Log.guard(TAG, "soft light mode at " + stage, () -> XposedBridge.hookMethod(symbols.method(stage), new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    nativeSetMasterMode(FilterScope.MASTER_MODE.equals(symbols.get("FeaturePresenter.modeName", param.thisObject)));
+                    nativeSetMasterMode(FilterScope.isMasterMode(symbols.get("FeaturePresenter.modeName", param.thisObject)));
                 }
             }));
         }

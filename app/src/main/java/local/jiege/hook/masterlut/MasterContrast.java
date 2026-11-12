@@ -39,7 +39,7 @@ public final class MasterContrast {
         final Symbols symbols = Symbols.get();
         Log.guard(TAG, "value on entering master", () -> XposedBridge.hookMethod(symbols.method("Lut3d.load"), new XC_MethodHook() {
             @Override protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                if (FilterScope.MASTER_MODE.equals(param.args[2])) MasterLutSlots.set(MasterLutSlots.Param.CONTRAST, stored(symbols));
+                if (FilterScope.isMasterMode(param.args[2])) MasterLutSlots.set(MasterLutSlots.Param.CONTRAST, stored(symbols));
             }
         }));
         Log.guard(TAG, "menu construction", () -> XposedBridge.hookAllConstructors(symbols.cls("EffectMenu"), new XC_MethodHook() {

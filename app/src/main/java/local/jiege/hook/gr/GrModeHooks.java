@@ -10,6 +10,7 @@ import local.jiege.hook.common.Log;
 import local.jiege.hook.common.Reflection;
 import local.jiege.hook.common.SuperCall;
 import local.jiege.hook.common.Symbols;
+import local.jiege.hook.filters.FilterScope;
 
 /**
  * GR port: makes the realme GR mode (app GrMode, SDK GRCapMode) run on PMA110.
@@ -209,7 +210,7 @@ final class GrModeHooks {
                     Object stage = param.args[0];
                     if (stage == null || (Integer) symbols.get("ModeSwitchStage.stage", stage) != 2) return;
                     Object target = symbols.get("ModeSwitchStage.toMode", stage);
-                    if (!"gr".equals(target) && !"professional".equals(target)) return;
+                    if (!"gr".equals(target) && !FilterScope.isMasterMode(target)) return;
                     if (symbols.get("CaptureParams.panel", param.thisObject) != null) {
                         symbols.call("CaptureParams.releasePanel", param.thisObject);
                     }

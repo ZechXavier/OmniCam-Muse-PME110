@@ -69,7 +69,6 @@ import local.jiege.settings.ModuleSettings;
  */
 public final class LegacyFilterPanel {
     private static final String TAG = "LegacyFilterPanel";
-    private static final String MASTER = "professional";
     private static final String CAPTURE_PARAMS = "com.oplus.camera.feature.capture_params";
     private static final String EFFECT_STYLE = "com.oplus.feature.effect.style.support";
     private static final String FILTER_BEAN = "com.oplus.camera.filter.FilterBean";
@@ -221,7 +220,7 @@ public final class LegacyFilterPanel {
             Object effectPanel = of(effectPanels, activity);
             if (presenter == null) return false;
             Symbols symbols = Symbols.get();
-            boolean master = MASTER.equals(symbols.get("FeaturePresenter.modeName", presenter));
+            boolean master = FilterScope.isMasterMode(symbols.get("FeaturePresenter.modeName", presenter));
             // The beauty menu object of an earlier mode may outlive that mode: the path follows the mode.
             if (master) beautyUi = null;
             if (master ? effectPanel == null : beautyUi == null) {
