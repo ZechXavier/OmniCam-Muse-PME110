@@ -29,10 +29,13 @@ final class GrModeHooks {
     static void install(ClassLoader classLoader) throws Throwable {
         Symbols symbols = Symbols.get();
         SuperCall.verify();
-        hookModeEntry(symbols);
-        hookAppModeInheritance(symbols);
-        hookSdkModeInheritance(classLoader);
-        GrState.init(symbols);
+        // Each step is guarded: if an early step throws (e.g. an SDK class missing
+        // on this platform), the later hooks — especially the GrSupport force-TRUE
+        // that makes the factory create GrMode — must still install.
+        Log.guard(TAG, "GR mode entry", () -> hookModeEntry(symbols));
+        Log.guard(TAG, "GR app mode inheritance", () -> hookAppModeInheritance(symbols));
+        Log.guard(TAG, "GR SDK mode inheritance", () -> hookSdkModeInheritance(classLoader));
+        Log.guard(TAG, "GR state init", () -> GrState.init(symbols));
         Log.guard(TAG, "GR entrance buttons", () -> hookEntranceButtons(symbols, classLoader));
         Log.guard(TAG, "GR effect branch", () -> hookMasterEffectBranch(symbols));
         Log.guard(TAG, "GR effect panel lifecycle", () -> hookEffectPanelLifecycle(symbols));
