@@ -26,6 +26,7 @@ public final class Log {
         try {
             installer.install();
         } catch (Throwable error) {
+            Diagnostics.recordHookFailure(tag, part);
             e(tag, part + " unavailable", error);
         }
     }

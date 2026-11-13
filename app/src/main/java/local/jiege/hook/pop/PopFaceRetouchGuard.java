@@ -13,11 +13,17 @@ import local.jiege.hook.common.Log;
  * fp16Tofp32_neon_accelerate_convert) reads past the POP rear capture buffer (8-bit SDR). Stock
  * X9U has no POP mode, so this combination was never tuned; front POP is unaffected.
  * The node is removed from the capture algorithm list of rear POP requests.
+ *
+ * PME110: the native preview pipeline has no retro capmode, so it publishes a fallback
+ * (common) algo list that lacks basic_tone and filter — the retro look never reaches the
+ * photo. The list is restored here: basic_tone and filter are appended when missing.
  */
 final class PopFaceRetouchGuard {
     private static final String TAG = "PopPort";
     private static final String SDK = "com.oplus.ocs.camera.";
     private static final String FACE_RETOUCH = "aps_algo_facebase_retouch";
+    private static final String BASIC_TONE = "aps_algo_basic_tone";
+    private static final String FILTER = "aps_algo_filter";
 
     private PopFaceRetouchGuard() {}
 
@@ -39,9 +45,20 @@ final class PopFaceRetouchGuard {
                 if (algorithms == null) return;
                 List<String> kept = new ArrayList<>();
                 for (String algorithm : algorithms) if (!FACE_RETOUCH.equals(algorithm)) kept.add(algorithm);
-                if (kept.size() == algorithms.length) return;
+                boolean changed = kept.size() != algorithms.length;
+                // Restore the nodes the native fallback list drops: basic_tone (retro look)
+                // and filter (Meishe retro filter). Without them POP photos come out untoned.
+                if (!kept.contains(BASIC_TONE)) {
+                    kept.add(BASIC_TONE);
+                    changed = true;
+                }
+                if (!kept.contains(FILTER)) {
+                    kept.add(FILTER);
+                    changed = true;
+                }
+                if (!changed) return;
                 XposedHelpers.callMethod(meta, "setParameter", algorithmKey, (Object) kept.toArray(new String[0]));
-                Log.i(TAG, "rear POP face retouch removed");
+                Log.i(TAG, "rear POP algorithms restored " + kept);
             }
         });
     }

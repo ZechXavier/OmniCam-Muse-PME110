@@ -22,6 +22,9 @@ import local.jiege.settings.ModuleSettings;
  * feature unconditionally):
  * - the mode reports the filter menu, filter process and palette as supported;
  * - the hard-coded "modes that use the normal filter" list and the soft light lists include it;
+ * - the mode reports soft-light and lighting processing as supported, so FilterPresenter.apply
+ *   actually applies the tapped soft-light type instead of silently dropping it (without this
+ *   the menu and presenter states diverge and the shutter button vanishes after a tap);
  * - the right-hand enter button (BaseMode.Li) is shown, and its beauty UI manager can look the mode up;
  * - the viewfinder palette LUT: gate (Lut3dDataManager), texture engine flag and LUT texture request;
  * - soft light is opened in the capture request (the presenter only does it for a few mode names).
@@ -32,6 +35,8 @@ public final class HighPixelEffects {
     private static final String FILTER_PROCESS = "pref_filter_process_key";
     private static final String FILTER_MENU = "pref_filter_menu";
     private static final String PALETTE = "key_support_palette";
+    private static final String SOFT_LIGHT_PROCESS = "pref_soft_light_process_key";
+    private static final String LIGHTING_PROCESS = "pref_lighting_process_key";
 
     private static final Set<String> answered = Collections.synchronizedSet(new HashSet<>());
 
@@ -62,7 +67,8 @@ public final class HighPixelEffects {
         XposedHelpers.findAndHookMethod(mode, "getSupportFunction", String.class, new XC_MethodHook() {
             @Override protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                 String key = (String) param.args[0];
-                if (!FILTER_PROCESS.equals(key) && !FILTER_MENU.equals(key) && !PALETTE.equals(key)) return;
+                if (!FILTER_PROCESS.equals(key) && !FILTER_MENU.equals(key) && !PALETTE.equals(key)
+                        && !SOFT_LIGHT_PROCESS.equals(key) && !LIGHTING_PROCESS.equals(key)) return;
                 if (!Settings.get(ModuleSettings.HIGH_PIXEL_EFFECTS)) return;
                 Boolean answer = PALETTE.equals(key) ? paletteConfigured(paletteMode) : Boolean.TRUE;
                 param.setResult(answer);

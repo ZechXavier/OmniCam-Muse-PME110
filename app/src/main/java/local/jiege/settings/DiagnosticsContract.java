@@ -27,6 +27,10 @@ public final class DiagnosticsContract {
     public static final String KEY_SYMBOLS_MISSING = "symbolsMissing";
     /** Number of error lines (hooks that failed to install or failed at run time). */
     public static final String KEY_ERRORS = "errors";
+    /** Number of hook installers that failed (a subset of errors, counted separately). */
+    public static final String KEY_HOOK_FAILURES = "hookFailures";
+    /** The failed hook installers, one "tag: part" per line. */
+    public static final String KEY_HOOK_FAILURE_LIST = "hookFailureList";
     /** Whether the process sees the module's /odm files (false: unmounted for it, features off). */
     public static final String KEY_FILES_MOUNTED = "filesMounted";
     /** Recent module log lines of the camera process. */

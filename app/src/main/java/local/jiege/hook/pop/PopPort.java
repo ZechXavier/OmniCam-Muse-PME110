@@ -31,6 +31,16 @@ public final class PopPort {
             Log.e(TAG, "POP face retouch guard unavailable", error);
         }
         try {
+            PopModeName.install(classLoader);
+        } catch (Throwable error) {
+            Log.e(TAG, "POP mode name hook unavailable", error);
+        }
+        try {
+            PopFeatureInject.install(classLoader);
+        } catch (Throwable error) {
+            Log.e(TAG, "POP feature inject unavailable", error);
+        }
+        try {
             PopHighPixel.install(classLoader);
         } catch (Throwable error) {
             Log.e(TAG, "POP high pixel hook unavailable", error);

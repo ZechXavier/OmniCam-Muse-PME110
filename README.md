@@ -1,6 +1,6 @@
-# OmniCam Muse
+# OmniCam Muse (PME110 port)
 
-**OPPO Find X9 Ultra（PMA110）的相机增强模块。** 当前版本 Muse 4.4.4，适配相机 7.006.119。
+**OPPO Find X9s Pro（PME110，天玑 9500）的相机增强模块。** 由上游 Find X9 Ultra（PMA110）版移植，当前版本 Muse 4.4.4-pme110，适配相机 7.006.121。
 
 Muse 深入原厂 HAL、相机框架和成像链路，重构画质、色彩与交互逻辑，并补回被机型策略拆开的模式与调色资产。
 
@@ -93,7 +93,7 @@ Muse 由 KernelSU 模块和 LSPosed 设置应用组成：模块通过绑定挂�
 需要已 root（KernelSU）并安装 LSPosed。
 
 1. 构建得到 `OmniCam-Muse-<版本>-KSU.zip`（见"构建"）。
-2. 在 KernelSU 管理器中刷入模块（ID `ricoh_pop_x9u`）并重启。模块自带设置应用（包名 `local.jiege.camera`），刷入时一并安装。
+2. 在 KernelSU 管理器中刷入模块（ID `ricoh_pop_pme110`）并重启。模块自带设置应用（包名 `local.jiege.camera`），刷入时一并安装。
 3. 在 LSPosed 中启用 OmniCam Muse，作用域勾选**系统框架、相机、相册**。
 4. 强制停止相机后重新打开。
 

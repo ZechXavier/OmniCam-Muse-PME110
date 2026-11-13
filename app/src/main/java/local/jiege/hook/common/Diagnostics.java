@@ -27,6 +27,7 @@ public final class Diagnostics {
     private static final ArrayDeque<String> lines = new ArrayDeque<>();
     private static final long startTime = System.currentTimeMillis();
     private static int errors;
+    private static final ArrayDeque<String> hookFailures = new ArrayDeque<>();
     private static String apkPath;
     private static int symbolsResolved;
     private static int symbolsMissing;
@@ -87,6 +88,13 @@ public final class Diagnostics {
         }
     }
 
+    /** Called by Log.guard when a hook installer fails; counted separately from runtime errors. */
+    static void recordHookFailure(String tag, String part) {
+        synchronized (lock) {
+            hookFailures.addLast(tag + ": " + part);
+        }
+    }
+
     private static boolean fromModule() {
         Application app = currentApplication();
         if (app == null) return false;
@@ -101,6 +109,8 @@ public final class Diagnostics {
             state.putInt(DiagnosticsContract.KEY_SYMBOLS_RESOLVED, symbolsResolved);
             state.putInt(DiagnosticsContract.KEY_SYMBOLS_MISSING, symbolsMissing);
             state.putInt(DiagnosticsContract.KEY_ERRORS, errors);
+            state.putInt(DiagnosticsContract.KEY_HOOK_FAILURES, hookFailures.size());
+            state.putString(DiagnosticsContract.KEY_HOOK_FAILURE_LIST, String.join("\n", hookFailures));
             state.putLong(DiagnosticsContract.KEY_START, startTime);
             state.putInt(DiagnosticsContract.KEY_PID, Process.myPid());
             state.putString(DiagnosticsContract.KEY_LOG, String.join("\n", lines));

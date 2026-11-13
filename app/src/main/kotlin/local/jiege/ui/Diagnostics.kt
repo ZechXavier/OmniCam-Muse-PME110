@@ -78,8 +78,10 @@ internal class InjectionState(val checks: List<Check>, val health: Health) {
                     else -> {
                         val missing = report.getInt(DiagnosticsContract.KEY_SYMBOLS_MISSING)
                         val errors = report.getInt(DiagnosticsContract.KEY_ERRORS)
+                        val hookFailures = report.getInt(DiagnosticsContract.KEY_HOOK_FAILURES)
                         checks += when {
                             missing > 0 -> Check("${label}注入", false, "$missing 个符号未匹配，${label}版本可能不受支持")
+                            hookFailures > 0 -> Check("${label}注入", false, "$hookFailures 个功能未注入：" + (report.getString(DiagnosticsContract.KEY_HOOK_FAILURE_LIST) ?: ""))
                             errors > 0 -> Check("${label}注入", false, "$errors 条错误，请导出日志发给作者")
                             else -> Check("${label}注入", true, "已注入，" + report.getInt(DiagnosticsContract.KEY_SYMBOLS_RESOLVED) + " 个符号")
                         }

@@ -24,6 +24,14 @@
 // SC∘CWCM, dst, nSrc, nLut, begin, end), four threads over [begin, end), dst interleaved RGB. With
 // every stock adjustment at zero the stock copies the LMT without a call; the Java half then applies
 // Post(Pre()) to the returned table (MasterLutSlots.java).
+//
+// Preview on MTK (P2, GPU texture path): libCombineLut.so does not exist, and MergeLutTet_resize is
+// never called in the HDRTransform preview path (P1 confirmed infeasible). The preview LUT reaches
+// the screen as a GLTexture3D: BasicTone_OGL::loadContext / GPUPreviewLut::loadLut convert the
+// planar float32 table to interleaved float16 RGB (n^3 entries, 6 bytes each) and upload it via
+// GLTexture3D::GLTexture3D(n, n, n, GL_RGB16F, GL_RGB, GL_HALF_FLOAT, GL_LINEAR, data), which
+// uploads synchronously (set -> glTexImage3D). The P2 hook intercepts the constructor, applies
+// Pre then Post to a copy of the float16 data, and passes the copy to the original.
 #include <android/log.h>
 #include <jni.h>
 
@@ -171,6 +179,79 @@ void applyInterleaved(const std::vector<Stage> &stages, float *rgb, int begin, i
     for (int i = begin; i < end; ++i) run(stages, rgb + 3 * i);
 }
 
+// IEEE 754 binary16 <-> binary32 conversion (bit manipulation; no FP16 hardware needed).
+float halfToFloat(uint16_t h) {
+    uint32_t sign = (static_cast<uint32_t>(h & 0x8000) << 16);
+    uint32_t exp = (h >> 10) & 0x1F;
+    uint32_t mant = h & 0x03FF;
+    uint32_t f;
+    if (exp == 0) {
+        if (mant == 0) {
+            f = sign;  // Zero.
+        } else {
+            // Subnormal: normalize.
+            int e = 1;
+            while ((mant & 0x0400) == 0) { mant <<= 1; --e; }
+            mant &= 0x03FF;
+            f = sign | (static_cast<uint32_t>(e + 112) << 23) | (mant << 13);
+        }
+    } else if (exp == 31) {
+        f = sign | 0x7F800000 | (mant << 13);  // Inf/NaN.
+    } else {
+        f = sign | ((exp + 112) << 23) | (mant << 13);
+    }
+    float out;
+    std::memcpy(&out, &f, sizeof(out));
+    return out;
+}
+
+uint16_t floatToHalf(float value) {
+    uint32_t f;
+    std::memcpy(&f, &value, sizeof(f));
+    uint32_t sign = (f >> 16) & 0x8000;
+    int exp = static_cast<int>((f >> 23) & 0xFF) - 127 + 15;  // Re-bias to half exponent.
+    uint32_t mant = f & 0x7FFFFF;
+    uint16_t h;
+    if (exp <= 0) {
+        if (exp < -10) {
+            h = static_cast<uint16_t>(sign);  // Underflow to zero.
+        } else {
+            // Subnormal: shift the implicit leading 1 down.
+            mant |= 0x800000;
+            int shift = 14 - exp;
+            uint32_t m = mant >> shift;
+            uint32_t remainder = mant & ((1u << shift) - 1);
+            uint32_t halfway = 1u << (shift - 1);
+            if (remainder > halfway || (remainder == halfway && (m & 1))) ++m;  // Round to nearest even.
+            h = static_cast<uint16_t>(sign | m);
+        }
+    } else if (exp >= 31) {
+        h = static_cast<uint16_t>(sign | 0x7C00);  // Overflow to inf.
+    } else {
+        uint32_t m = mant >> 13;
+        uint32_t remainder = mant & 0x1FFF;
+        if (remainder > 0x1000 || (remainder == 0x1000 && (m & 1))) ++m;  // Round to nearest even.
+        if (m == 0x400) {  // Mantissa overflow carries into the exponent.
+            m = 0;
+            if (++exp >= 31) return static_cast<uint16_t>(sign | 0x7C00);
+        }
+        h = static_cast<uint16_t>(sign | (static_cast<uint32_t>(exp) << 10) | m);
+    }
+    return h;
+}
+
+// Applies the stages to an interleaved float16 RGB cube (n^3 entries, 3 halves each).
+void applyHalfInterleaved(const std::vector<Stage> &stages, uint16_t *data, int count) {
+    if (stages.empty()) return;
+    for (int i = 0; i < count; ++i) {
+        float rgb[3] = {halfToFloat(data[3 * i]), halfToFloat(data[3 * i + 1]), halfToFloat(data[3 * i + 2])};
+        run(stages, rgb);
+        for (int c = 0; c < 3; ++c) rgb[c] = std::clamp(rgb[c], 0.0f, 1.0f);
+        data[3 * i] = floatToHalf(rgb[0]);
+        data[3 * i + 1] = floatToHalf(rgb[1]);
+        data[3 * i + 2] = floatToHalf(rgb[2]);
+    }
+}
 // ---- capture ----
 
 using Resize = uintptr_t (*)(void *, float *, float *, float *, int, int);
@@ -355,6 +436,39 @@ uintptr_t resize2Rgb(float *src, float *lut, float *dst, int nSrc, int nLut, int
     return result;
 }
 
+// ---- preview on MTK (P2, GPU texture path) ----
+
+// GLTexture3D::GLTexture3D(int w, int h, int d, int internalFormat, unsigned format,
+// unsigned type, int filter, void *data). The 9th argument (data) is passed on the stack by the
+// AArch64 ABI; declaring it as a regular parameter lets the compiler read it from the stack.
+using GlTexture3DCtor =
+    void (*)(void *, int, int, int, int, unsigned, unsigned, int, void *);
+GlTexture3DCtor originalGlTexture3DCtor;
+
+void glTexture3DCtor(void *thiz, int w, int h, int d, int internalFormat, unsigned format,
+                     unsigned type, int filter, void *data) {
+    auto active = slots();
+    // Only the preview LUT cube in master mode: a cube texture (w == h == d), RGB16F / RGB /
+    // HALF_FLOAT, with data. Anything else (non-cube, other formats, no data) passes through.
+    if (!previewMaster.load() || (active->pre.empty() && active->post.empty()) || w != h || h != d
+        || w <= 0 || w > 64 || internalFormat != 0x881B || format != 0x1907 || type != 0x140B
+        || !data) {
+        return originalGlTexture3DCtor(thiz, w, h, d, internalFormat, format, type, filter, data);
+    }
+    previewApplied.store(true);
+    int count = w * w * w;
+    // Copy the interleaved float16 RGB data, apply Pre then Post to the copy, and pass the copy
+    // to the original. The constructor uploads synchronously (set -> glTexImage3D copies the
+    // data to the GPU), so the copy can be freed as soon as the original returns. The stock
+    // buffer is never modified, so leaving master mode needs no restore.
+    std::vector<uint16_t> modified(3 * static_cast<size_t>(count));
+    std::memcpy(modified.data(), data, modified.size() * sizeof(uint16_t));
+    applyHalfInterleaved(active->pre, modified.data(), count);
+    applyHalfInterleaved(active->post, modified.data(), count);
+    __android_log_print(ANDROID_LOG_INFO, kTag,
+                        "preview GLTexture3D %dx%dx%d master slots applied", w, h, d);
+    originalGlTexture3DCtor(thiz, w, h, d, internalFormat, format, type, filter, modified.data());
+}
 }  // namespace
 
 void onLibraryLoadedForLutSlots(HookFunction hook, const char *name, void *handle) {
@@ -368,6 +482,17 @@ void onLibraryLoadedForLutSlots(HookFunction hook, const char *name, void *handl
     } else if (std::strstr(name, "libCombineLut.so") && !originalResize2Rgb) {
         hookExport(hook, handle, "_Z22MergeLutTet_resize2rgbPfS_S_iiii",
                    reinterpret_cast<void *>(resize2Rgb), reinterpret_cast<void **>(&originalResize2Rgb), kTag);
+    } else if ((std::strstr(name, "libOPAlgoCamHDRTransformCamera.so")
+                || std::strstr(name, "libOPAlgoCamHDRTransformQuick.so")
+                || std::strstr(name, "libOPAlgoCamPortraitHDRTransform.so"))
+               && !originalGlTexture3DCtor) {
+        // MTK preview (P2): the LUT reaches the screen as a GLTexture3D. dlsym resolves the
+        // constructor to the definition the dynamic linker chose (it is defined in several
+        // libs); the !originalGlTexture3DCtor guard keeps the second HDRTransform lib from
+        // re-hooking the same address.
+        hookExport(hook, handle, "_ZN11GLTexture3DC1EiiiijjiPv",
+                   reinterpret_cast<void *>(glTexture3DCtor),
+                   reinterpret_cast<void **>(&originalGlTexture3DCtor), kTag);
     }
 }
 
