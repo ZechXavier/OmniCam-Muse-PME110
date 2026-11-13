@@ -45,20 +45,17 @@ final class GrModeHooks {
         Log.i(TAG, "GR mode hooks installed");
     }
 
-    /** CameraEntry's mode entry has no GR case; enter as professional and restore the argument. */
+    /**
+     * CameraEntry's mode entry has no GR case on the QTI builds this port came from, so the
+     * upstream hook entered GR as professional and restored the argument afterwards. On
+     * 7.006.121 the factory DOES have a GR case (packed-switch value 34 -> GrMode), and
+     * CameraEntry.enter references "gr" directly — rewriting the argument to "professional"
+     * makes the factory create a ProMode instead of a GrMode, so GR shows its UI but the
+     * shutter and filters do nothing (no GrMode, no GrEffectTransport hooks fire).
+     * Disabled on PME110: let "gr" through unchanged.
+     */
     private static void hookModeEntry(Symbols symbols) {
-        XposedBridge.hookMethod(symbols.method("CameraEntry.enter"), new XC_MethodHook() {
-            @Override protected void beforeHookedMethod(MethodHookParam param) {
-                if ("gr".equals(param.args[0])) {
-                    param.setObjectExtra("grEntry", Boolean.TRUE);
-                    param.args[0] = "professional";
-                }
-            }
-
-            @Override protected void afterHookedMethod(MethodHookParam param) {
-                if (Boolean.TRUE.equals(param.getObjectExtra("grEntry"))) param.args[0] = "gr";
-            }
-        });
+        Log.i(TAG, "GR mode entry rewrite disabled on PME110 (factory has a GR case)");
     }
 
     /** App side: GrMode borrows professional, photo-mode and BaseMode implementations. */
