@@ -24,8 +24,11 @@ import local.jiege.hook.common.Log;
  * creates {@code Laj/c} when the key is requested, and the FeatureManager only
  * iterates the list for the active mode, so the injection is safe.
  *
- * (The proper follow-up is to copy the mode-table entries into the adapted protobuf;
- * this hook is the robust primary fix.)
+ * NOTE (2026-11-13): copying the PMA110 mode-table entries into the adapted protobuf
+ * was tried in v4.4.4-pme110.6 and REVERTED — the camera crashed on startup because
+ * the MTK SDK's Value parser hit a NumberFormatException on a QTI-only feature value
+ * ("feature_video_neon_enable") inside the spliced entries. This hook is the fix;
+ * the protobuf stays stock-shaped (top-level feature names only).
  */
 final class PopFeatureInject {
     private static final String TAG = "PopPort";
