@@ -204,6 +204,7 @@ final class GrModeHooks {
                 }
             }
         });
+        Log.i(TAG, "GR supported() forced TRUE (PME110: stock config says unsupported)");
         XposedBridge.hookMethod(symbols.method("CaptureParams.restoreEffects"), new XC_MethodHook() {
             @Override protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                 if (!"gr".equals(symbols.get("FeaturePresenter.modeName", param.thisObject))) restoringOutsideGr.set(Boolean.TRUE);

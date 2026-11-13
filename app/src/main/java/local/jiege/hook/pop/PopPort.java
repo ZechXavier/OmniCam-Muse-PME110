@@ -35,11 +35,7 @@ public final class PopPort {
         } catch (Throwable error) {
             Log.e(TAG, "POP mode name hook unavailable", error);
         }
-        try {
-            PopFeatureInject.install(classLoader);
-        } catch (Throwable error) {
-            Log.e(TAG, "POP feature inject unavailable", error);
-        }
+        Log.guard(TAG, "POP feature inject", () -> PopFeatureInject.install(classLoader));
         try {
             PopHighPixel.install(classLoader);
         } catch (Throwable error) {
