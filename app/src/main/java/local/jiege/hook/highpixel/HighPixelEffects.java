@@ -51,6 +51,7 @@ public final class HighPixelEffects {
             symbols.field("PalettePreview.request"), symbols.method("Lut3dData.paletteMode")));
         Log.guard(TAG, "preview lut texture", () -> hookLutTexture(symbols.method("Mode.needBasicToneLut"), symbols.cls("HighPixelMode")));
         Log.guard(TAG, "soft light types", () -> hookSoftLightTypes(symbols.<Method>all("SoftLight.typesForMode")));
+        Log.guard(TAG, "soft light GL gate watch", () -> SoftLightWatch.install(classLoader));
         Log.guard(TAG, "soft light capture", () -> hookSoftLightCapture(symbols.method("FilterPresenter.captureRequest"),
             symbols.method("FilterPresenter.softLightIndex"), symbols.field("FeaturePresenter.modeName")));
         Log.guard(TAG, "beauty model", () -> hookBeautyModel(symbols.cls("BeautyModel")));

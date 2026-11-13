@@ -28,6 +28,12 @@ static constexpr char kOdmPalette[] = "/odm/etc/camera/basictone/palette";
 static constexpr char kAppPalette[] = "/data/user/0/com.oplus.camera/files/pop_port/palette";
 static constexpr char kOdmLut[] = "/odm/etc/camera/meishe_lut/";
 static constexpr char kAppLut[] = "/data/user/0/com.oplus.camera/files/pop_port/meishe_lut/";
+// POP UI resources: the Polaroid frame background (retro_ui_bg.webp) is loaded from
+// APS_CFG_PATH + "apk_resources/img/" (i.e. /odm/etc/camera/apk_resources/img/).
+// Stock PME110 has no such file (no retro mode); service.sh stages the QTI stock copy.
+static constexpr char kOdmApkRes[] = "/odm/etc/camera/apk_resources/";
+static constexpr char kProductApkRes[] = "/product/etc/camera/apk_resources/";
+static constexpr char kAppApkRes[] = "/data/user/0/com.oplus.camera/files/pop_port/apk_resources/";
 // Master filters the user imported in the settings app (MasterFilterSync copies them here).
 static constexpr char kImportedLut[] = "/data/user/0/com.oplus.camera/files/jiege/lut/";
 
@@ -89,6 +95,22 @@ static const char *remap(const char *path, char *buf, size_t n) {
         if (destExists(buf)) {
             return buf;
         }
+    }
+    // POP UI resources (retro_ui_bg.webp): redirect both /odm and /product roots,
+    // whichever getCameraPartitionRoot() returns on this device.
+    if (std::strncmp(path, kOdmApkRes, sizeof(kOdmApkRes) - 1) == 0) {
+        std::snprintf(buf, n, "%s%s", kAppApkRes, path + sizeof(kOdmApkRes) - 1);
+        if (destExists(buf)) {
+            return buf;
+        }
+        return path;
+    }
+    if (std::strncmp(path, kProductApkRes, sizeof(kProductApkRes) - 1) == 0) {
+        std::snprintf(buf, n, "%s%s", kAppApkRes, path + sizeof(kProductApkRes) - 1);
+        if (destExists(buf)) {
+            return buf;
+        }
+        return path;
     }
     return path;
 }

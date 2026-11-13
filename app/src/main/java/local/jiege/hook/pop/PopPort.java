@@ -1,6 +1,7 @@
 package local.jiege.hook.pop;
 
 import local.jiege.hook.common.Log;
+import local.jiege.hook.common.Symbols;
 
 /**
  * POP port: the retro camera (POP) mode. Its settings, LUTs and Polaroid assets are staged by the
@@ -36,6 +37,7 @@ public final class PopPort {
             Log.e(TAG, "POP mode name hook unavailable", error);
         }
         Log.guard(TAG, "POP feature inject", () -> PopFeatureInject.install(classLoader));
+        Log.guard(TAG, "POP recovery watch", () -> PopRecoveryWatch.install(Symbols.get()));
         try {
             PopHighPixel.install(classLoader);
         } catch (Throwable error) {
