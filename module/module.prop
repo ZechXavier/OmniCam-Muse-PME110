@@ -1,6 +1,6 @@
 id=ricoh_pop_pme110
 name=OmniCam Muse (PME110)
-version=Muse 4.4.4-pme110.10
+version=Muse 4.4.4-pme110.11
 versionCode=444
 author=local-port
 description=RICOH GR, POP, X10 and master filter features, ported to Find X9s Pro (PME110, MTK), with a settings app.

@@ -15,15 +15,22 @@ import local.jiege.hook.common.Log;
  * The node is removed from the capture algorithm list of rear POP requests.
  *
  * PME110: the native preview pipeline has no retro capmode, so it publishes a fallback
- * (common) algo list that lacks basic_tone and filter — the retro look never reaches the
- * photo. The list is restored here: basic_tone and filter are appended when missing.
+ * (common) algo list that lacks basic_tone — the retro look never reaches the photo.
+ * basic_tone is appended here when missing (PopModeName already fixed the SDK side so
+ * the native list usually has it; this is a belt-and-braces fallback).
+ *
+ * NOTE (2026-11-14): do NOT append aps_algo_filter. The native list has no filter because
+ * mbFilterOpen=false for POP (the retro look is a mode attribute, not a user filter), so
+ * the SDK writes KEY_FILTER_ENABLE=false. Appending filter to the algo list while
+ * FILTER_ENABLE is false makes the native pipeline hang waiting for filter parameters
+ * that never come — the capture never completes and the camera process dies ~9s later.
+ * BasicTone alone provides the retro look; filter is not needed.
  */
 final class PopFaceRetouchGuard {
     private static final String TAG = "PopPort";
     private static final String SDK = "com.oplus.ocs.camera.";
     private static final String FACE_RETOUCH = "aps_algo_facebase_retouch";
     private static final String BASIC_TONE = "aps_algo_basic_tone";
-    private static final String FILTER = "aps_algo_filter";
 
     private PopFaceRetouchGuard() {}
 
@@ -46,14 +53,12 @@ final class PopFaceRetouchGuard {
                 List<String> kept = new ArrayList<>();
                 for (String algorithm : algorithms) if (!FACE_RETOUCH.equals(algorithm)) kept.add(algorithm);
                 boolean changed = kept.size() != algorithms.length;
-                // Restore the nodes the native fallback list drops: basic_tone (retro look)
-                // and filter (Meishe retro filter). Without them POP photos come out untoned.
+                // Restore basic_tone if the native fallback list dropped it (retro look).
+                // Do NOT append filter: with mbFilterOpen=false the SDK writes
+                // KEY_FILTER_ENABLE=false, and a filter entry in the algo list with the
+                // enable flag off hangs the native pipeline (capture never completes).
                 if (!kept.contains(BASIC_TONE)) {
                     kept.add(BASIC_TONE);
-                    changed = true;
-                }
-                if (!kept.contains(FILTER)) {
-                    kept.add(FILTER);
                     changed = true;
                 }
                 if (!changed) return;

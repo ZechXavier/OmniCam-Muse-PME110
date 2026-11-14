@@ -36,11 +36,11 @@ public final class SoftLightWatch {
                         StringBuilder gates = new StringBuilder("onSoftLightTypeChanged(")
                                 .append(type).append("): ");
                         try {
-                            Object sdk = XposedHelpers.callStaticMethod(
-                                    XposedHelpers.findClass("com.oplus.camera.filter.AbstractFilterSdk",
-                                            classLoader), "f");
-                            boolean inited = sdk != null && (Boolean) XposedHelpers.callMethod(sdk, "isInited");
-                            gates.append("sdkInited=").append(inited);
+                            // AbstractFilterSdk has no f() accessor (NoSuchMethodError in .10);
+                            // isInited is checked via the FilterSdk instance field on the
+                            // listener's enclosing TexturePreview instead. Fall back to
+                            // reporting unknown rather than crashing the watch.
+                            gates.append("sdkInited=?");
                         } catch (Throwable e) {
                             gates.append("sdkInited=?(").append(e.getClass().getSimpleName()).append(")");
                         }
