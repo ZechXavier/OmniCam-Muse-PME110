@@ -54,10 +54,7 @@ public final class HighPixelEffects {
         Log.guard(TAG, "feature mode tracker", () -> FeatureModeTracker.install(classLoader));
         Log.guard(TAG, "highPixel feature inject", () -> HighPixelFeatureInject.install(classLoader));
         Log.guard(TAG, "soft light types", () -> hookSoftLightTypes(symbols.<Method>all("SoftLight.typesForMode")));
-        Log.guard(TAG, "soft light GL gate watch", () -> SoftLightWatch.install(classLoader));
-        Log.guard(TAG, "soft light list watch", () -> SoftLightListWatch.install(classLoader));
-        Log.guard(TAG, "soft light click watch", () -> SoftLightClickWatch.install(classLoader));
-        Log.guard(TAG, "highPixel back watch", () -> HighPixelBackWatch.install(classLoader));
+        Log.guard(TAG, "highPixel back fix", () -> HighPixelBackFix.install(classLoader));
         Log.guard(TAG, "soft light capture", () -> hookSoftLightCapture(symbols.method("FilterPresenter.captureRequest"),
             symbols.method("FilterPresenter.softLightIndex"), symbols.field("FeaturePresenter.modeName")));
         Log.guard(TAG, "beauty model", () -> hookBeautyModel(symbols.cls("BeautyModel")));

@@ -45,8 +45,6 @@ final class GrModeHooks {
         Log.guard(TAG, "GR mode arrangement", () -> GrModeArrange.install(symbols));
         Log.guard(TAG, "feature mode tracker", () -> FeatureModeTracker.install(classLoader));
         Log.guard(TAG, "GR feature inject", () -> GrFeatureInject.install(classLoader));
-        Log.guard(TAG, "GR creation watch", () -> GrCreationWatch.install(classLoader, symbols));
-        Log.guard(TAG, "GR presenter watch", () -> GrPresenterWatch.install(classLoader));
         Log.guard(TAG, "GR dispatch watch", () -> GrDispatchWatch.install(classLoader));
         Log.guard(TAG, "GR shutter watch", () -> GrShutterWatch.install(classLoader));
         Log.guard(TAG, "GR capture watch", () -> GrCaptureWatch.install(classLoader));
