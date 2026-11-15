@@ -6,7 +6,7 @@ import local.jiege.hook.common.FeatureModeTracker;
 import local.jiege.hook.common.Log;
 
 /**
- * GR capture-path diagnostics + ld() fix (PME110, .16).
+ * GR capture-path diagnostics + ic() fix (PME110, .17).
  *
  * Root-cause report: pme110-gr-h8gap-highpixel-back-2026-11-15.md (round 6).
  *
@@ -19,10 +19,14 @@ import local.jiege.hook.common.Log;
  * stabilize"), Gh() clears the P flag between presses, and the next press
  * defers again — an infinite deferral loop.
  *
- * Fix A (this file): after-hook BaseMode.ld() — in GR mode, if it returns
- * FALSE, force TRUE. GR has no fallback pipeline (vc.l does not exist), so
- * waiting for fallback stability is meaningless; skipping it is safe.
- * GR-scoped only; other modes untouched.
+ * Fix B (.17) replaces Fix A (.16, ld forcing). .16 proved ld() is called
+ * ~108x during GR preview from Ce()/b8()/fe()/ff(), so forcing ld() TRUE had
+ * unscoped side effects on preview-time evaluation (Ce went FALSE in .16 vs
+ * TRUE in .15, and zero shutter-path logs were recorded despite presses).
+ * Fix B after-hooks BaseMode.ic() — in GR mode, if it returns FALSE, force
+ * TRUE. ic() is called only from g8 (single capture) and em.d3.Cf (burst
+ * capture, "onBurstShotCapture"), both legitimate capture paths where waiting
+ * for a non-existent fallback is meaningless. GR-scoped only.
  *
  * Diagnostic hooks H1-H10 (log-only, GR-gated except H6) verify Fix A and
  * confirm the ic-gate diagnosis:
@@ -134,7 +138,14 @@ public final class GrCaptureWatch {
             Log.e(TAG, "GR capture watch: H2 (g8) unavailable", e);
         }
 
-        // H3: ic before+after.
+        // H3: ic before+after + Fix B — in GR, force TRUE when FALSE.
+        // Fix B (.17) replaces Fix A (.16, ld forcing). .16 proved ld() is
+        // called 108x during GR preview from Ce()/b8()/fe()/ff(), so forcing
+        // ld() TRUE had unscoped side effects on preview-time evaluation
+        // (Ce went FALSE in .16 vs TRUE in .15). ic() is called only from
+        // g8 (single capture) and em.d3.Cf (burst capture, "onBurstShotCapture"),
+        // both legitimate capture paths where waiting for a non-existent
+        // fallback is meaningless. Forcing ic() TRUE is surgical.
         try {
             XposedHelpers.findAndHookMethod("com.oplus.camera.module.BaseMode",
                     classLoader, "ic", boolean.class, boolean.class,
@@ -145,7 +156,12 @@ public final class GrCaptureWatch {
                         }
                         @Override protected void afterHookedMethod(MethodHookParam param) {
                             if (!inGr()) return;
-                            Log.i(TAG, "capture.ic -> " + param.getResult());
+                            Object orig = param.getResult();
+                            Log.i(TAG, "capture.ic -> " + orig);
+                            if (Boolean.FALSE.equals(orig)) {
+                                param.setResult(Boolean.TRUE);
+                                Log.i(TAG, "capture.ic FIXED to true (GR has no fallback)");
+                            }
                         }
                     });
             installed++;
@@ -167,26 +183,22 @@ public final class GrCaptureWatch {
             Log.e(TAG, "GR capture watch: H4 (jc) unavailable", e);
         }
 
-        // H5a + Fix A: ld after — log original, force TRUE in GR.
+        // H5a: ld after — log only. Fix A (ld forcing) REMOVED in .17:
+        // .16 proved ld() is called ~108x during GR preview from Ce()/b8()/
+        // fe()/ff(), so forcing it TRUE had unscoped side effects on
+        // preview-time evaluation. The ic gate is now opened directly (Fix B,
+        // H3 above); ld() is left untouched.
         try {
             XposedHelpers.findAndHookMethod("com.oplus.camera.module.BaseMode",
                     classLoader, "ld", new XC_MethodHook() {
                         @Override protected void afterHookedMethod(MethodHookParam param) {
                             if (!inGr()) return;
-                            Object orig = param.getResult();
-                            Log.i(TAG, "capture.ld -> " + orig);
-                            // Fix A: GR has no fallback pipeline (vc.l does not
-                            // exist), so waiting for fallback stability is
-                            // meaningless. Skip it.
-                            if (Boolean.FALSE.equals(orig)) {
-                                param.setResult(Boolean.TRUE);
-                                Log.i(TAG, "capture.ld FIXED to true (GR has no fallback)");
-                            }
+                            Log.i(TAG, "capture.ld -> " + param.getResult());
                         }
                     });
             installed++;
         } catch (Throwable e) {
-            Log.e(TAG, "GR capture watch: H5a/Fix A (ld) unavailable", e);
+            Log.e(TAG, "GR capture watch: H5a (ld) unavailable", e);
         }
 
         // H5b: gb/e1.F after — vc.l exists?
@@ -309,6 +321,42 @@ public final class GrCaptureWatch {
             Log.e(TAG, "GR capture watch: H10 (gb.e1.W) unavailable", e);
         }
 
-        Log.i(TAG, "GR capture watch installed (" + installed + "/12 hooks) + ld fix");
+        // H11 (.17): MainShutterButton.onTouchEvent before — log EVERY touch
+        // on the shutter button, NOT GR-gated (record mode in the line).
+        // .16 showed zero shutter.e logs despite the user pressing the button
+        // in GR; this hook definitively answers whether the touch reaches the
+        // button at all. If touch logs appear but shutter.e does not, the
+        // touch is swallowed between onTouchEvent and the listener.
+        // Signature verified: MainShutterButton.onTouchEvent(MotionEvent)
+        // defined in classes.txt:1476339 (7.006.121).
+        try {
+            XposedHelpers.findAndHookMethod("com.oplus.camera.control.MainShutterButton",
+                    classLoader, "onTouchEvent", android.view.MotionEvent.class,
+                    new XC_MethodHook() {
+                        @Override protected void beforeHookedMethod(MethodHookParam param) {
+                            String mode;
+                            try {
+                                mode = FeatureModeTracker.currentMode();
+                            } catch (Throwable ignored) {
+                                mode = "?";
+                            }
+                            android.view.MotionEvent ev =
+                                    (android.view.MotionEvent) param.args[0];
+                            int action = ev != null ? ev.getActionMasked() : -1;
+                            boolean enabled = false;
+                            try {
+                                enabled = ((android.view.View) param.thisObject).isEnabled();
+                            } catch (Throwable ignored) {
+                            }
+                            Log.i(TAG, "touch.shutter mode=" + mode
+                                    + " action=" + action + " enabled=" + enabled);
+                        }
+                    });
+            installed++;
+        } catch (Throwable e) {
+            Log.e(TAG, "GR capture watch: H11 (shutter touch) unavailable", e);
+        }
+
+        Log.i(TAG, "GR capture watch installed (" + installed + "/13 hooks) + ic fix");
     }
 }
