@@ -57,6 +57,7 @@ public final class HighPixelEffects {
         Log.guard(TAG, "soft light GL gate watch", () -> SoftLightWatch.install(classLoader));
         Log.guard(TAG, "soft light list watch", () -> SoftLightListWatch.install(classLoader));
         Log.guard(TAG, "soft light click watch", () -> SoftLightClickWatch.install(classLoader));
+        Log.guard(TAG, "highPixel back watch", () -> HighPixelBackWatch.install(classLoader));
         Log.guard(TAG, "soft light capture", () -> hookSoftLightCapture(symbols.method("FilterPresenter.captureRequest"),
             symbols.method("FilterPresenter.softLightIndex"), symbols.field("FeaturePresenter.modeName")));
         Log.guard(TAG, "beauty model", () -> hookBeautyModel(symbols.cls("BeautyModel")));
