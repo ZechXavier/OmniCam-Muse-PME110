@@ -42,7 +42,9 @@ final class GrModeHooks {
         Log.guard(TAG, "master effect entry", () -> GrMasterEffectEntry.install(symbols));
         Log.guard(TAG, "GR style feature", () -> hookStyleFeature(classLoader));
         Log.guard(TAG, "GR mode arrangement", () -> GrModeArrange.install(symbols));
+        Log.guard(TAG, "GR feature inject", () -> GrFeatureInject.install(classLoader));
         Log.guard(TAG, "GR creation watch", () -> GrCreationWatch.install(classLoader, symbols));
+        Log.guard(TAG, "GR dispatch watch", () -> GrDispatchWatch.install(classLoader));
         Log.i(TAG, "GR mode hooks installed");
     }
 

@@ -31,11 +31,18 @@ public final class PopPort {
         } catch (Throwable error) {
             Log.e(TAG, "POP face retouch guard unavailable", error);
         }
-        try {
-            PopModeName.install(classLoader);
-        } catch (Throwable error) {
-            Log.e(TAG, "POP mode name hook unavailable", error);
-        }
+        // NOTE (2026-11-15): PopModeName is DISABLED for diagnosis. The .12 diagnostics
+        // showed the camera HAL reporting "repeatingRequestEnd: Transaction error" 1s
+        // after POP capture, followed by onCameraError self-kill — in both .11 (no
+        // filter) and .12 (with filter). Hypothesis: PopModeName makes the SDK query
+        // the retroCamera AlgoSwitchConfig, whose results the MTK HAL rejects. With
+        // PopModeName off, the SDK queries the common config (HAL knows it) and
+        // PopFaceRetouchGuard still appends basic_tone as a fallback.
+        // try {
+        //     PopModeName.install(classLoader);
+        // } catch (Throwable error) {
+        //     Log.e(TAG, "POP mode name hook unavailable", error);
+        // }
         Log.guard(TAG, "POP feature inject", () -> PopFeatureInject.install(classLoader));
         Log.guard(TAG, "POP recovery watch", () -> PopRecoveryWatch.install(Symbols.get()));
         try {
