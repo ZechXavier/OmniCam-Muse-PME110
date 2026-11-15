@@ -7,6 +7,7 @@ import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
+import local.jiege.hook.common.FeatureModeTracker;
 import local.jiege.hook.common.Log;
 import local.jiege.hook.common.Settings;
 import local.jiege.hook.common.Symbols;
@@ -50,6 +51,8 @@ public final class HighPixelEffects {
         Log.guard(TAG, "preview palette engine", () -> hookPalettePreview(symbols.cls("PalettePreview"), symbols.field("PalettePreview.flag"),
             symbols.field("PalettePreview.request"), symbols.method("Lut3dData.paletteMode")));
         Log.guard(TAG, "preview lut texture", () -> hookLutTexture(symbols.method("Mode.needBasicToneLut"), symbols.cls("HighPixelMode")));
+        Log.guard(TAG, "feature mode tracker", () -> FeatureModeTracker.install(classLoader));
+        Log.guard(TAG, "highPixel feature inject", () -> HighPixelFeatureInject.install(classLoader));
         Log.guard(TAG, "soft light types", () -> hookSoftLightTypes(symbols.<Method>all("SoftLight.typesForMode")));
         Log.guard(TAG, "soft light GL gate watch", () -> SoftLightWatch.install(classLoader));
         Log.guard(TAG, "soft light list watch", () -> SoftLightListWatch.install(classLoader));

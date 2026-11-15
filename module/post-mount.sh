@@ -2,6 +2,13 @@
 set -eu
 MODDIR=${0%/*}
 
+# A/B test switch (v4.4.4-pme110.14): if the file skip_post_mount exists in the
+# module directory, skip the libAlgoInterface.so bind-mount entirely. This tests
+# whether the patched native library itself causes the POP HAL crash.
+# Usage: su -c 'touch /data/adb/modules/ricoh_pop_pme110/skip_post_mount' && reboot
+# To re-enable: su -c 'rm /data/adb/modules/ricoh_pop_pme110/skip_post_mount' && reboot
+[ -f "$MODDIR/skip_post_mount" ] && exit 0
+
 bind_library() {
     NAME=$1
     SOURCE="$MODDIR/system/odm/lib64/$NAME"

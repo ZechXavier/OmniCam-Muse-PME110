@@ -3,6 +3,7 @@ package local.jiege.hook.pop;
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedHelpers;
 import java.util.Set;
+import local.jiege.hook.common.FeatureModeTracker;
 import local.jiege.hook.common.Log;
 
 /**
@@ -29,6 +30,12 @@ import local.jiege.hook.common.Log;
  * the MTK SDK's Value parser hit a NumberFormatException on a QTI-only feature value
  * ("feature_video_neon_enable") inside the spliced entries. This hook is the fix;
  * the protobuf stays stock-shaped (top-level feature names only).
+ *
+ * MODE SCOPING (v4.4.4-pme110.14, blocking fix): the injection is restricted to the
+ * retro_camera_mode only, via FeatureModeTracker. In .13 the unscoped injection
+ * (all modes, together with GrFeatureInject) corrupted FeatureManager's presenter
+ * generation and caused CameraMenuContainerBottom.h0() to NPE on every back press
+ * (9 crashes in one session). Never inject unscoped.
  */
 final class PopFeatureInject {
     private static final String TAG = "PopPort";
@@ -42,13 +49,15 @@ final class PopFeatureInject {
         XposedHelpers.findAndHookMethod(adapter, "getFeatureInfoList", int.class,
             new XC_MethodHook() {
                 @Override protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    // Mode-scoped: only inject when FeatureManager is generating retro_camera_mode.
+                    if (!FeatureModeTracker.isMode("retro_camera_mode")) return;
                     Object result = param.getResult();
                     if (!(result instanceof Set)) return;
                     @SuppressWarnings("unchecked")
                     Set<Object> keys = (Set<Object>) result;
                     if (keys.contains(RETRO_FEATURE)) return;
                     keys.add(RETRO_FEATURE);
-                    Log.i(TAG, "retro feature injected into feature list");
+                    Log.i(TAG, "retro feature injected into feature list (mode=retro_camera_mode)");
                 }
             });
         Log.i(TAG, "retro feature inject installed");

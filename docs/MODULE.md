@@ -31,7 +31,10 @@ POP 的光感、自然饱和度、色温、色调随拍照参数以 `KEY_MASTER_
 3. 流水线节点：`ApsCapDecisionRearNormal25021::addCommonPipelines` 与 `ApsCapDecisionFrontNormal25021::addCommonPipelines` 只在 `ultra_hdr_enable` 为真时加入 BasicTone 节点（算法 0x4e，三个节点）。
 4. 全 0 跳过：BasicTone 预检在 POP 且四个值全 0 时直接返回；HybridRaw 交给它的是 10bit P010，跳过会把 P010 直接送去编码，主图损坏。
 
-`libAlgoInterface.so` 把第 3 处的两条分支（后置 `0x24B0DA0`、前置 `0x24BE164`）和第 4 处（`0x2040688`）改为 NOP，POP 走 SDR 时后置与前置的滑杆也生效。
+`libAlgoInterface.so` 把 BasicTone 节点门控改为 NOP（MTK 偏移，2026-11-15 逐字节核实：
+`0x17d125c`/`0x17eac5c`/`0x19c035c`/`0x19d9edc`/`0x1c2b1e4`/`0x1c4b6e4` 六处 tbz、
+`0x15a4ac0` cbz，均为原厂 `0x36000440`/`0x340001c8`），POP 走 SDR 时后置与前置的滑杆也生效。
+注意：旧文档记载的 `0x24B0DA0`/`0x24BE164`/`0x2040688` 是 QTI 偏移，MTK 上无效。
 
 10X 条纹：长焦（物理相机 4）硬件 IPE 离线处理在“10bit 输入 → 8bit 输出”时输出损坏，与 ISP 调校文件无关。让 IPE 保持 10bit 输出、由 BasicTone 转 8bit 即绕开。
 

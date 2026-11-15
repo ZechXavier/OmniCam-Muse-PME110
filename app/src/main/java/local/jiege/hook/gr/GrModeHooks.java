@@ -6,6 +6,7 @@ import de.robv.android.xposed.XC_MethodReplacement;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import java.lang.reflect.Method;
+import local.jiege.hook.common.FeatureModeTracker;
 import local.jiege.hook.common.Log;
 import local.jiege.hook.common.Reflection;
 import local.jiege.hook.common.SuperCall;
@@ -42,8 +43,10 @@ final class GrModeHooks {
         Log.guard(TAG, "master effect entry", () -> GrMasterEffectEntry.install(symbols));
         Log.guard(TAG, "GR style feature", () -> hookStyleFeature(classLoader));
         Log.guard(TAG, "GR mode arrangement", () -> GrModeArrange.install(symbols));
+        Log.guard(TAG, "feature mode tracker", () -> FeatureModeTracker.install(classLoader));
         Log.guard(TAG, "GR feature inject", () -> GrFeatureInject.install(classLoader));
         Log.guard(TAG, "GR creation watch", () -> GrCreationWatch.install(classLoader, symbols));
+        Log.guard(TAG, "GR presenter watch", () -> GrPresenterWatch.install(classLoader));
         Log.guard(TAG, "GR dispatch watch", () -> GrDispatchWatch.install(classLoader));
         Log.i(TAG, "GR mode hooks installed");
     }

@@ -1,5 +1,6 @@
 package local.jiege.hook.pop;
 
+import local.jiege.hook.common.FeatureModeTracker;
 import local.jiege.hook.common.Log;
 import local.jiege.hook.common.Symbols;
 
@@ -43,6 +44,7 @@ public final class PopPort {
         // } catch (Throwable error) {
         //     Log.e(TAG, "POP mode name hook unavailable", error);
         // }
+        Log.guard(TAG, "feature mode tracker", () -> FeatureModeTracker.install(classLoader));
         Log.guard(TAG, "POP feature inject", () -> PopFeatureInject.install(classLoader));
         Log.guard(TAG, "POP recovery watch", () -> PopRecoveryWatch.install(Symbols.get()));
         try {

@@ -71,7 +71,12 @@ final class PopFaceRetouchGuard {
                 for (String algorithm : algorithms) if (!FACE_RETOUCH.equals(algorithm)) kept.add(algorithm);
                 boolean changed = kept.size() != algorithms.length;
                 // Restore basic_tone if the native fallback list dropped it (retro look).
-                if (!kept.contains(BASIC_TONE)) {
+                // A/B switch (v4.4.4-pme110.14): if the file no_basictone exists in the
+                // module directory, skip the basic_tone append — tests whether basic_tone
+                // itself causes the POP HAL crash. Usage:
+                //   su -c 'touch /data/adb/modules/ricoh_pop_pme110/no_basictone' && reboot
+                if (!kept.contains(BASIC_TONE) && !new java.io.File(
+                        "/data/adb/modules/ricoh_pop_pme110/no_basictone").exists()) {
                     kept.add(BASIC_TONE);
                     changed = true;
                 }

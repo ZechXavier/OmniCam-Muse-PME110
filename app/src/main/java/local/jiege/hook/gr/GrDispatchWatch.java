@@ -20,7 +20,7 @@ public final class GrDispatchWatch {
     public static void install(ClassLoader classLoader) {
         try {
             Class<?> stage = XposedHelpers.findClass(
-                    "com.oplus.camera.module.EventMessageCaptureRequestStage", classLoader);
+                    "com.oplus.camera.protocal.event.message.deviceProtocol.deviceControlRequest.EventMessageCaptureRequestStage", classLoader);
             XposedHelpers.findAndHookMethod(
                     "com.oplus.camera.module.BaseMode", classLoader, "Yf", stage,
                     new XC_MethodHook() {
