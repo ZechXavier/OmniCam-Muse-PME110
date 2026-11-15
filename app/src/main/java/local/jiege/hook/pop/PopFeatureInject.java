@@ -49,15 +49,18 @@ final class PopFeatureInject {
         XposedHelpers.findAndHookMethod(adapter, "getFeatureInfoList", int.class,
             new XC_MethodHook() {
                 @Override protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    // Mode-scoped: only inject when FeatureManager is generating retro_camera_mode.
-                    if (!FeatureModeTracker.isMode("retro_camera_mode")) return;
+                    // Mode-scoped: only inject when FeatureManager is generating retroCamera.
+                    // NOTE: the mode name passed to generateFeatures is "retroCamera"
+                    // (confirmed in .14 diagnostics), NOT "retro_camera_mode" — the latter
+                    // is the SDK config name, not the mode name.
+                    if (!FeatureModeTracker.isMode("retroCamera")) return;
                     Object result = param.getResult();
                     if (!(result instanceof Set)) return;
                     @SuppressWarnings("unchecked")
                     Set<Object> keys = (Set<Object>) result;
                     if (keys.contains(RETRO_FEATURE)) return;
                     keys.add(RETRO_FEATURE);
-                    Log.i(TAG, "retro feature injected into feature list (mode=retro_camera_mode)");
+                    Log.i(TAG, "retro feature injected into feature list (mode=retroCamera)");
                 }
             });
         Log.i(TAG, "retro feature inject installed");
