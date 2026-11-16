@@ -54,6 +54,13 @@ public final class HighPixelBackFix {
     /** Last container seen by the h0 hook (h0's thisObject). Volatile: the
      * Kg hook may run on a different thread. */
     private static volatile Object lastContainer;
+    /** Container captured at construction (CameraMenuContainerBottom is
+     * inflated from layout once per camera session). The Kg trigger uses
+     * this, NOT lastContainer: back presses route through Kg -> F0/r9, not
+     * h0, so h0 may never have been called when the first back press lands
+     * (.19's Kg trigger depended on lastContainer and could silently no-op).
+     * Verified constructor: <init>(Context, AttributeSet) (classes11.txt). */
+    private static volatile Object containerInstance;
 
     private HighPixelBackFix() {}
 
@@ -166,6 +173,20 @@ public final class HighPixelBackFix {
 
     public static void install(final ClassLoader classLoader) {
         int installed = 0;
+        // Trigger 0: constructor — capture the container instance permanently
+        // so the Kg trigger never depends on h0 having been called.
+        try {
+            XposedHelpers.findAndHookConstructor(CONTAINER, classLoader,
+                    android.content.Context.class, android.util.AttributeSet.class,
+                    new XC_MethodHook() {
+                        @Override protected void afterHookedMethod(MethodHookParam param) {
+                            containerInstance = param.thisObject;
+                        }
+                    });
+            installed++;
+        } catch (Throwable e) {
+            Log.e(TAG, "highPixel back fix: constructor hook unavailable", e);
+        }
         // Trigger 1: h0-after (existing). Also records the container for the
         // Kg trigger and logs back-press h0 calls (minimal visibility: the
         // .18 test proved we cannot tell whether presses reach h0 at all).
@@ -197,7 +218,8 @@ public final class HighPixelBackFix {
                     new XC_MethodHook() {
                         @Override protected void afterHookedMethod(MethodHookParam param) {
                             if (!Boolean.TRUE.equals(param.getResult())) return;
-                            Object container = lastContainer;
+                            Object container = containerInstance;
+                            if (container == null) container = lastContainer;
                             if (container == null) return;
                             if (!isOpen(container)) return;
                             scheduleStuckCheck(container, classLoader, "Kg");
@@ -207,6 +229,6 @@ public final class HighPixelBackFix {
         } catch (Throwable e) {
             Log.e(TAG, "highPixel back fix: Kg hook unavailable", e);
         }
-        Log.i(TAG, "highPixel back fix installed (" + installed + "/2 triggers)");
+        Log.i(TAG, "highPixel back fix installed (" + installed + "/3 hooks)");
     }
 }

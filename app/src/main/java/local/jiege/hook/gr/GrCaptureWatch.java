@@ -28,14 +28,16 @@ import local.jiege.hook.common.Log;
  * capture, "onBurstShotCapture"), both legitimate capture paths where waiting
  * for a non-existent fallback is meaningless. GR-scoped only.
  *
- * Fix C (.19): .18 proved h8 returns FALSE 15/15 in GR WITHOUT calling g8 —
+ * Fix C (.19/.20): .18 proved h8 returns FALSE 15/15 in GR WITHOUT calling g8 —
  * the round-6 "h8 necessarily calls g8" conclusion was wrong. h8's Td-TRUE
  * path (011d) ends at 01e4: the timer-shutter support flag v0 is FALSE in GR
  * (no timer branch in getSupportFunction), so h8 returns FALSE before ever
  * reaching the 0238 g8 call. The g8 path (021e) is only reached when Td
- * returns FALSE. Fix C after-hooks BaseMode.Td() — in GR, force FALSE, so h8
- * routes to 021e -> g8 -> Fix B -> Yf dispatch -> capture. The camera IS
- * ready in GR (m8 TRUE, Jg TRUE); Td TRUE is the anomaly.
+ * returns FALSE. .19 forced Td FALSE unconditionally — but that defeats
+ * itself: g8 calls Td at 00a7 and treats FALSE as "not ready to capture",
+ * and f8 (0021) has the same polarity. .20 forces Td FALSE ONLY when the
+ * caller is h8 (identified by stack inspection; h8 and g8 call Td with
+ * identical arguments, so the stack is the only distinguisher).
  *
  * Diagnostic hooks H1-H10 (log-only, GR-gated except H6) verify Fix A and
  * confirm the ic-gate diagnosis:
@@ -119,21 +121,15 @@ public final class GrCaptureWatch {
             Log.e(TAG, "GR capture watch: H1 (h8) unavailable", e);
         }
 
-        // Fix C (.19): Td after — force FALSE in GR.
-        // .18 proved h8 returns FALSE 15/15 in GR WITHOUT ever calling g8,
-        // overturning the round-6 conclusion that "h8 necessarily calls g8".
-        // h8's real structure (classes12.txt:967236):
-        //  - Td TRUE  -> 011d timer/interval path -> 01e4: v0 (timer-shutter
-        //    support flag) is FALSE in GR (BaseMode.getSupportFunction has no
-        //    timer branch, gm.k/gm.g0/gm.q don't override it) -> 0099 ->
-        //    return FALSE. g8 is NEVER reached.
-        //  - Td FALSE -> 021e: publish EventMessageCaptureType, check .d;
-        //    no GR subscriber sets .d TRUE -> 0238 calls g8 -> Fix B (ic
-        //    forcing) opens the gate -> Yf dispatch -> capture.
-        // So the immediate-capture path requires Td FALSE. In GR the camera
-        // IS ready (m8/APS decision TRUE, Jg allowToCapture TRUE); Td TRUE
-        // is the anomaly. Forcing Td FALSE in GR routes h8 to the g8 path.
-        // Signature verified: BaseMode.Td:(ZZZZ)Z (classes12.txt:940376).
+        // Fix C (.20): Td after — force FALSE ONLY when called from h8.
+        // .19 proved unconditional Td forcing defeats itself: g8 calls Td at
+        // 00a7 and treats FALSE as "not ready to capture" -> returns FALSE.
+        // f8 (0021) has the same polarity ("unable to capture" if FALSE).
+        // Only h8 (0117) needs Td FALSE (to route to the 021e -> g8 path).
+        // h8 and g8 call Td with IDENTICAL arguments (t.c(), true, t.h(),
+        // t.e.), so the call site can only be distinguished by stack
+        // inspection. gm.k does not override Td, so the hooked BaseMode.Td
+        // is called directly by h8/g8/f8/Si.
         try {
             XposedHelpers.findAndHookMethod("com.oplus.camera.module.BaseMode",
                     classLoader, "Td", boolean.class, boolean.class,
@@ -141,10 +137,21 @@ public final class GrCaptureWatch {
                     new XC_MethodHook() {
                         @Override protected void afterHookedMethod(MethodHookParam param) {
                             if (!inGr()) return;
-                            Object orig = param.getResult();
-                            if (Boolean.TRUE.equals(orig)) {
+                            if (!Boolean.TRUE.equals(param.getResult())) return;
+                            // First BaseMode frame that is not Td itself is
+                            // the caller (h8/g8/f8/Si).
+                            String caller = null;
+                            for (StackTraceElement e
+                                    : Thread.currentThread().getStackTrace()) {
+                                if (!"com.oplus.camera.module.BaseMode"
+                                        .equals(e.getClassName())) continue;
+                                if ("Td".equals(e.getMethodName())) continue;
+                                caller = e.getMethodName();
+                                break;
+                            }
+                            if ("h8".equals(caller)) {
                                 param.setResult(Boolean.FALSE);
-                                Log.i(TAG, "capture.Td FIXED to false (route h8 to g8)");
+                                Log.i(TAG, "capture.Td FIXED to false (caller=h8, route to g8)");
                             }
                         }
                     });
